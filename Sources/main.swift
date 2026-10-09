@@ -1,4 +1,5 @@
 import AppKit
+import Carbon
 import SwiftUI
 
 /// Borderless panel that floats above the menu bar and never steals focus.
@@ -33,6 +34,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Drag pasteboard generation at the last mouse-down: a change during dragging means a real drag session.
     private var dragChangeCount = 0
     private var dragWatch: Timer?
+    private var hotKey: HotKey?
     private var leftAt: Date?
 
     private let canvasSize = CGSize(width: 760, height: 640)
@@ -55,8 +57,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.trackMouse()
         }
         NSEvent.addGlobalMonitorForEvents(matching: .leftMouseDown) { [weak self] _ in
-            self?.dragChangeCount = NSPasteboard(name: .drag).changeCount
+            guard let self else { return }
+            self.dragChangeCount = NSPasteboard(name: .drag).changeCount
+            // Opened from the keyboard: a click anywhere else closes it.
+            if self.model.pinnedOpen, !self.islandRect(padding: 4).contains(NSEvent.mouseLocation) {
+                self.model.setHovering(false)
+            }
         }
+
+        // ⌥Space opens/closes the island.
+        hotKey = HotKey(keyCode: kVK_Space, modifiers: optionKey) { [weak self] in
+            self?.model.toggleFromHotKey()
+        }
+        if hotKey == nil { NSLog("NotchIsland: Option+Space is already used by another app") }
         NSEvent.addLocalMonitorForEvents(matching: [.mouseMoved, .leftMouseDragged, .mouseExited]) { [weak self] event in
             self?.trackMouse()
             return event
@@ -110,6 +123,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    private func islandRect(padding pad: CGFloat) -> CGRect {
+        guard let screen = targetScreen else { return .zero }
+        let size = model.islandSize
+        return CGRect(x: screen.frame.midX - size.width / 2 - pad,
+                      y: screen.frame.maxY - size.height - pad,
+                      width: size.width + pad * 2,
+                      height: size.height + pad + 1)
+    }
+
     private func trackMouse() {
         guard let screen = targetScreen else { return }
         let mouse = NSEvent.mouseLocation
@@ -133,6 +155,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let now = Date()
         if inside {
             leftAt = nil
+            model.unpin()
             if enteredAt == nil { enteredAt = now }
             if !model.isExpanded {
                 model.setHoverHint(true)
@@ -141,14 +164,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         } else {
             enteredAt = nil
             model.setHoverHint(false)
-            if model.isExpanded && !model.dragOutActive {
+            if model.isExpanded && !model.dragOutActive && !model.pinnedOpen {
                 if leftAt == nil { leftAt = now }
                 if now.timeIntervalSince(leftAt!) > 0.25 { model.setHovering(false) }
             }
         }
 
         // The mouse may stop moving while a delay is still running — check again shortly.
-        let pending = (inside && !model.isExpanded) || (!inside && model.isExpanded)
+        let pending = (inside && !model.isExpanded) || (!inside && model.isExpanded && !model.pinnedOpen)
         recheckTimer?.invalidate()
         recheckTimer = pending
             ? Timer.scheduledTimer(withTimeInterval: 0.05, repeats: false) { [weak self] _ in self?.trackMouse() }

@@ -11,6 +11,25 @@ enum IslandState: Equatable {
     case drop        // files are being dragged near the notch → AirDrop target
 }
 
+enum IslandTab: String, CaseIterable, Identifiable {
+    case music, apps, shelf
+    var id: String { rawValue }
+    var symbol: String {
+        switch self {
+        case .music: return "music.note"
+        case .apps: return "square.grid.2x2.fill"
+        case .shelf: return "tray.fill"
+        }
+    }
+    var title: String {
+        switch self {
+        case .music: return "Музыка"
+        case .apps: return "Приложения"
+        case .shelf: return "Полка"
+        }
+    }
+}
+
 final class IslandModel: ObservableObject {
     @Published var notchSize = CGSize(width: 185, height: 32)
     @Published private(set) var hovering = false
@@ -20,6 +39,10 @@ final class IslandModel: ObservableObject {
     @Published private(set) var devicePeek: DeviceEvent?
     /// Files parked on the shelf (persisted between launches).
     @Published private(set) var shelf: [URL] = []
+    @Published private(set) var selectedTab: IslandTab =
+        IslandTab(rawValue: UserDefaults.standard.string(forKey: "selectedTab") ?? "") ?? .music
+    /// Opened with the keyboard shortcut: stays open until the shortcut, a click outside, or a hover-out.
+    private(set) var pinnedOpen = false
     /// Quick-launch apps shown under the player (persisted).
     @Published private(set) var apps: [URL] = []
     @Published private(set) var runningBundleIDs: Set<String> = []
@@ -97,9 +120,6 @@ final class IslandModel: ObservableObject {
     static let contentTop: CGFloat = 10     // below the header row (its text already sits mid-row)
     static let contentBottom: CGFloat = 20
     static let playlistHeight: CGFloat = 230
-    static let shelfHeight: CGFloat = 104
-    static let launcherHeight: CGFloat = 36
-    static let launcherGap: CGFloat = 12     // between the player and the app row
 
     func size(for state: IslandState) -> CGSize {
         switch state {
@@ -109,10 +129,8 @@ final class IslandModel: ObservableObject {
         case .device:   return CGSize(width: notchSize.width + 2 * 125, height: notchSize.height)
         case .drop:     return CGSize(width: max(540, notchSize.width + 350), height: notchSize.height + 112)
         case .expanded: return CGSize(width: max(480, notchSize.width + 290),
-                                     height: notchSize.height + Self.contentTop + Self.artworkSize
-                                        + Self.launcherGap + Self.launcherHeight + Self.contentBottom
-                                        + (showPlaylist ? Self.playlistHeight + Self.contentBottom : 0)
-                                        + (shelf.isEmpty ? 0 : Self.shelfHeight + Self.contentBottom))
+                                     height: notchSize.height + Self.contentTop + Self.artworkSize + Self.contentBottom
+                                        + (selectedTab == .music && showPlaylist ? Self.playlistHeight + Self.contentBottom : 0))
         }
     }
 
@@ -141,9 +159,31 @@ final class IslandModel: ObservableObject {
         withAnimation(value ? Self.open : Self.close) {
             hovering = value
             hoverHint = false
-            if !value { showPlaylist = false }
+            if !value { showPlaylist = false; pinnedOpen = false }
         }
     }
+
+    func selectTab(_ tab: IslandTab) {
+        guard tab != selectedTab else { return }
+        withAnimation(Self.spring) {
+            selectedTab = tab
+            if tab != .music { showPlaylist = false }
+        }
+        UserDefaults.standard.set(tab.rawValue, forKey: "selectedTab")
+    }
+
+    /// Keyboard shortcut: open (and keep open) or close the island.
+    func toggleFromHotKey() {
+        if hovering {
+            setHovering(false)
+        } else {
+            setHovering(true)
+            pinnedOpen = true
+        }
+    }
+
+    /// Once the pointer has been over the island, normal hover rules take over again.
+    func unpin() { pinnedOpen = false }
 
     func setHoverHint(_ value: Bool) {
         guard value != hoverHint, !hovering else { return }
@@ -363,6 +403,7 @@ final class IslandModel: ObservableObject {
             self.setFileDrag(false)
             let new = urls.filter { !self.shelf.contains($0) }
             withAnimation(Self.spring) { self.shelf.append(contentsOf: new) }
+            if !new.isEmpty { self.selectTab(.shelf) }
             self.saveShelf()
         }
     }

@@ -187,7 +187,9 @@ struct ExpandedView: View {
     var body: some View {
         VStack(spacing: 0) {
             EarsLayout(notchWidth: model.notchSize.width, height: model.notchSize.height) {
-                Color.clear
+                TabBar(model: model)
+                    .padding(.leading, IslandModel.inset - 6)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             } right: {
                 HStack {
                     Spacer()
@@ -197,32 +199,80 @@ struct ExpandedView: View {
                 .padding(.trailing, IslandModel.inset - 7) // power button has its own 7pt hit padding
             }
 
-            MediaPanel(model: model)
-                .frame(height: IslandModel.artworkSize)
-                .padding(.horizontal, IslandModel.inset)
-                .padding(.top, IslandModel.contentTop)
+            // Every tab shares the player's height, so switching tabs never resizes the island.
+            ZStack(alignment: .top) {
+                switch model.selectedTab {
+                case .music: MediaPanel(model: model).transition(.islandContent(scale: 0.97))
+                case .apps: AppsTab(model: model).transition(.islandContent(scale: 0.97))
+                case .shelf: ShelfTab(model: model).transition(.islandContent(scale: 0.97))
+                }
+            }
+            .frame(height: IslandModel.artworkSize)
+            .padding(.horizontal, IslandModel.inset)
+            .padding(.top, IslandModel.contentTop)
+            .padding(.bottom, IslandModel.contentBottom)
 
-            LauncherRow(model: model)
-                .frame(height: IslandModel.launcherHeight)
-                .padding(.horizontal, IslandModel.inset - 6)
-                .padding(.top, IslandModel.launcherGap)
-                .padding(.bottom, IslandModel.contentBottom)
-
-            if model.showPlaylist {
+            if model.selectedTab == .music && model.showPlaylist {
                 PlaylistPanel(model: model)
                     .frame(height: IslandModel.playlistHeight)
                     .padding(.horizontal, IslandModel.inset - 8)
                     .padding(.bottom, IslandModel.contentBottom)
                     .transition(.islandContent(scale: 0.96))
             }
+        }
+    }
+}
 
-            if !model.shelf.isEmpty {
-                ShelfPanel(model: model)
-                    .frame(height: IslandModel.shelfHeight)
-                    .padding(.horizontal, IslandModel.inset - 8)
-                    .padding(.bottom, IslandModel.contentBottom)
-                    .transition(.islandContent(scale: 0.96))
+struct TabBar: View {
+    @ObservedObject var model: IslandModel
+    @Namespace private var ns
+
+    var body: some View {
+        HStack(spacing: 2) {
+            ForEach(IslandTab.allCases) { tab in
+                let selected = model.selectedTab == tab
+                Button { model.selectTab(tab) } label: {
+                    Image(systemName: tab.symbol)
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(.white.opacity(selected ? 1 : 0.45))
+                        .frame(width: 30, height: 22)
+                        .background {
+                            if selected {
+                                Capsule().fill(.white.opacity(0.15))
+                                    .matchedGeometryEffect(id: "selectedTab", in: ns)
+                            }
+                        }
+                        .overlay(alignment: .topTrailing) {
+                            if tab == .shelf && !model.shelf.isEmpty {
+                                Circle().fill(.white).frame(width: 5, height: 5).offset(x: -5, y: 3)
+                            }
+                        }
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help(tab.title)
             }
+        }
+    }
+}
+
+/// Shared empty state for the Apps and Shelf tabs.
+private struct EmptyTab: View {
+    let symbol: String
+    let text: String
+    var buttonTitle: String? = nil
+    var action: () -> Void = {}
+
+    var body: some View {
+        HStack(spacing: 14) {
+            RoundedRectangle(cornerRadius: 14, style: .continuous).fill(.white.opacity(0.08))
+                .frame(width: IslandModel.artworkSize, height: IslandModel.artworkSize)
+                .overlay(Image(systemName: symbol).font(.system(size: 28)).foregroundStyle(.secondary))
+            VStack(alignment: .leading, spacing: 10) {
+                Text(text).font(.system(size: 13, weight: .semibold)).fixedSize(horizontal: false, vertical: true)
+                if let buttonTitle { PillButton(title: buttonTitle, action: action) }
+            }
+            Spacer(minLength: 0)
         }
     }
 }
@@ -392,34 +442,33 @@ private struct DropTile<Icon: View>: View {
 
 // MARK: - App launcher
 
-struct LauncherRow: View {
+struct AppsTab: View {
     @ObservedObject var model: IslandModel
 
     var body: some View {
-        HStack(spacing: 4) {
-            if model.apps.isEmpty {
-                Button { model.addApps() } label: {
-                    Label("Добавить приложения для быстрого запуска", systemImage: "plus.app")
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(.white.opacity(0.06)))
-                }
-                .buttonStyle(.plain)
-            } else {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 4) {
-                        ForEach(model.apps, id: \.self) { url in
-                            AppIcon(model: model, url: url)
-                                .transition(.scale(0.5).combined(with: .opacity))
-                        }
+        if model.apps.isEmpty {
+            EmptyTab(symbol: "square.grid.2x2", text: "Добавь приложения, в которых часто работаешь",
+                     buttonTitle: "Добавить") { model.addApps() }
+        } else {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 4) {
+                    ForEach(model.apps, id: \.self) { url in
+                        AppIcon(model: model, url: url)
+                            .transition(.scale(0.5).combined(with: .opacity))
                     }
-                    .padding(.horizontal, 4)
-                    .frame(maxHeight: .infinity)
+                    Button { model.addApps() } label: {
+                        VStack(spacing: 5) {
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .strokeBorder(.white.opacity(0.25), style: StrokeStyle(lineWidth: 1.2, dash: [4, 4]))
+                                .frame(width: 44, height: 44)
+                                .overlay(Image(systemName: "plus").font(.system(size: 15, weight: .semibold)).foregroundStyle(.secondary))
+                            Text("Добавить").font(.system(size: 10)).foregroundStyle(.secondary)
+                        }
+                        .frame(width: 66)
+                    }
+                    .buttonStyle(.plain)
                 }
-                IconButton(systemName: "plus", size: 11) { model.addApps() }
-                    .foregroundStyle(.secondary)
-                    .help("Добавить приложение")
+                .frame(maxHeight: .infinity)
             }
         }
     }
@@ -435,17 +484,21 @@ private struct AppIcon: View {
         let running = id.map { model.runningBundleIDs.contains($0) } ?? false
         let front = id != nil && id == model.frontmostBundleID
 
-        VStack(spacing: 2) {
+        VStack(spacing: 4) {
             Image(nsImage: model.icon(for: url))
                 .resizable()
-                .frame(width: 28, height: 28)
-                .scaleEffect(hover ? 1.18 : 1, anchor: .bottom)
+                .frame(width: 46, height: 46)
+                .scaleEffect(hover ? 1.12 : 1, anchor: .bottom)
+            Text(url.deletingPathExtension().lastPathComponent)
+                .font(.system(size: 10))
+                .lineLimit(1)
+                .frame(width: 62)
             Circle()
                 .fill(.white.opacity(front ? 0.95 : 0.45))
-                .frame(width: 3.5, height: 3.5)
+                .frame(width: 4, height: 4)
                 .opacity(running ? 1 : 0)
         }
-        .frame(width: 36)
+        .frame(width: 66)
         .contentShape(Rectangle())
         .onHover { h in withAnimation(.spring(duration: 0.25, bounce: 0.4)) { hover = h } }
         .onTapGesture { model.launch(url) }
@@ -458,43 +511,48 @@ private struct AppIcon: View {
             Divider()
             Button("Убрать из панели") { model.removeApp(url) }
         }
-        .help(url.deletingPathExtension().lastPathComponent)
     }
 }
 
 // MARK: - Shelf
 
-struct ShelfPanel: View {
+struct ShelfTab: View {
     @ObservedObject var model: IslandModel
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 8) {
-                Text("Полка").font(.system(size: 13, weight: .semibold))
-                Text("\(model.shelf.count)").font(.system(size: 11, weight: .medium).monospacedDigit()).foregroundStyle(.secondary)
-                Spacer()
-                IconButton(systemName: "paperplane", size: 10) { model.airDrop(urls: model.shelf) }
-                    .foregroundStyle(.secondary)
-                    .help("Отправить всё по AirDrop")
-                IconButton(systemName: "trash", size: 10) { model.clearShelf() }
-                    .foregroundStyle(.secondary)
-                    .help("Очистить полку")
-            }
-            .padding(.horizontal, 8)
-
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 6) {
-                    ForEach(model.shelf, id: \.self) { url in
-                        ShelfItem(model: model, url: url)
-                            .transition(.scale(0.6).combined(with: .opacity))
+        if model.shelf.isEmpty {
+            EmptyTab(symbol: "tray", text: "Перетащи файлы к вырезу и брось их на «Полку»")
+        } else {
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 8) {
+                    Text(Self.filesLabel(model.shelf.count))
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    IconButton(systemName: "paperplane", size: 10) { model.airDrop(urls: model.shelf) }
+                        .foregroundStyle(.secondary)
+                        .help("Отправить всё по AirDrop")
+                    IconButton(systemName: "trash", size: 10) { model.clearShelf() }
+                        .foregroundStyle(.secondary)
+                        .help("Очистить полку")
+                }
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 6) {
+                        ForEach(model.shelf, id: \.self) { url in
+                            ShelfItem(model: model, url: url)
+                                .transition(.scale(0.6).combined(with: .opacity))
+                        }
                     }
                 }
-                .padding(.horizontal, 6)
             }
         }
-        .padding(.top, 8)
-        .padding(.bottom, 6)
-        .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(.white.opacity(0.06)))
+    }
+
+    private static func filesLabel(_ n: Int) -> String {
+        let mod10 = n % 10, mod100 = n % 100
+        let word = mod10 == 1 && mod100 != 11 ? "файл"
+            : (2...4).contains(mod10) && !(12...14).contains(mod100) ? "файла" : "файлов"
+        return "\(n) \(word)"
     }
 }
 
