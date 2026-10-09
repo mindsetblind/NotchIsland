@@ -78,6 +78,12 @@ struct IslandView: View {
             ChargingPeekView(model: model)
                 .frame(width: model.size(for: .charging).width, height: model.notchSize.height)
                 .transition(.islandContent(scale: 0.8))
+        case .device:
+            if let event = model.devicePeek {
+                DevicePeekView(model: model, event: event)
+                    .frame(width: model.size(for: .device).width, height: model.notchSize.height)
+                    .transition(.islandContent(scale: 0.8))
+            }
         case .drop:
             let s = model.size(for: .drop)
             DropZoneView(model: model)
@@ -195,11 +201,24 @@ struct ExpandedView: View {
                 .frame(height: IslandModel.artworkSize)
                 .padding(.horizontal, IslandModel.inset)
                 .padding(.top, IslandModel.contentTop)
+
+            LauncherRow(model: model)
+                .frame(height: IslandModel.launcherHeight)
+                .padding(.horizontal, IslandModel.inset - 6)
+                .padding(.top, IslandModel.launcherGap)
                 .padding(.bottom, IslandModel.contentBottom)
 
             if model.showPlaylist {
                 PlaylistPanel(model: model)
                     .frame(height: IslandModel.playlistHeight)
+                    .padding(.horizontal, IslandModel.inset - 8)
+                    .padding(.bottom, IslandModel.contentBottom)
+                    .transition(.islandContent(scale: 0.96))
+            }
+
+            if !model.shelf.isEmpty {
+                ShelfPanel(model: model)
+                    .frame(height: IslandModel.shelfHeight)
                     .padding(.horizontal, IslandModel.inset - 8)
                     .padding(.bottom, IslandModel.contentBottom)
                     .transition(.islandContent(scale: 0.96))
@@ -303,7 +322,6 @@ struct ProgressRow: View {
 
 struct DropZoneView: View {
     @ObservedObject var model: IslandModel
-    @State private var targeted = false
 
     private static let airDropIcon: NSImage? = {
         let path = "/System/Library/CoreServices/Finder.app/Contents/Applications/AirDrop.app"
@@ -313,43 +331,262 @@ struct DropZoneView: View {
     var body: some View {
         VStack(spacing: 0) {
             Color.clear.frame(height: model.notchSize.height)
+            HStack(spacing: 12) {
+                DropTile(title: "Полка", hint: "Положить на полку") {
+                    Image(systemName: "tray.and.arrow.down.fill").resizable().scaledToFit().padding(7)
+                } onDrop: { model.addToShelf($0) }
 
-            ZStack {
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .fill(.white.opacity(targeted ? 0.12 : 0.04))
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .strokeBorder(.white.opacity(targeted ? 0.85 : 0.28),
-                                  style: StrokeStyle(lineWidth: 1.5, dash: [6, 5]))
-                HStack(spacing: 14) {
-                    Group {
-                        if let icon = Self.airDropIcon {
-                            Image(nsImage: icon).resizable()
-                        } else {
-                            Image(systemName: "dot.radiowaves.left.and.right").resizable().scaledToFit().padding(6)
-                        }
+                DropTile(title: "AirDrop", hint: "Отправить по AirDrop") {
+                    if let icon = Self.airDropIcon {
+                        Image(nsImage: icon).resizable()
+                    } else {
+                        Image(systemName: "dot.radiowaves.left.and.right").resizable().scaledToFit().padding(6)
                     }
-                    .frame(width: 46, height: 46)
-                    .scaleEffect(targeted ? 1.12 : 1)
-
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text("AirDrop").font(.system(size: 15, weight: .semibold))
-                        Text(targeted ? "Отпусти, чтобы отправить" : "Перетащи файлы сюда")
-                            .font(.system(size: 12))
-                            .foregroundStyle(.secondary)
-                            .contentTransition(.opacity)
-                    }
-                }
+                } onDrop: { model.airDrop($0) }
             }
             .padding(.horizontal, IslandModel.inset)
             .padding(.top, 8)
             .padding(.bottom, 20)
         }
+    }
+}
+
+/// One dashed drop target that lights up while files hover over it.
+private struct DropTile<Icon: View>: View {
+    let title: String
+    let hint: String
+    @ViewBuilder var icon: Icon
+    let onDrop: ([NSItemProvider]) -> Void
+    @State private var targeted = false
+
+    var body: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(.white.opacity(targeted ? 0.12 : 0.04))
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .strokeBorder(.white.opacity(targeted ? 0.85 : 0.28), style: StrokeStyle(lineWidth: 1.5, dash: [6, 5]))
+            HStack(spacing: 12) {
+                icon
+                    .frame(width: 42, height: 42)
+                    .scaleEffect(targeted ? 1.12 : 1)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(title).font(.system(size: 15, weight: .semibold))
+                    Text(targeted ? "Отпусти" : hint)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .contentTransition(.opacity)
+                }
+            }
+            .padding(.horizontal, 12)
+        }
         .onDrop(of: [.fileURL], isTargeted: $targeted.animation(.spring(duration: 0.3, bounce: 0.35))) { providers in
-            model.airDrop(providers)
+            onDrop(providers)
             return true
         }
         .onChange(of: targeted) { _, on in
             if on { NSHapticFeedbackManager.defaultPerformer.perform(.levelChange, performanceTime: .now) }
+        }
+    }
+}
+
+// MARK: - App launcher
+
+struct LauncherRow: View {
+    @ObservedObject var model: IslandModel
+
+    var body: some View {
+        HStack(spacing: 4) {
+            if model.apps.isEmpty {
+                Button { model.addApps() } label: {
+                    Label("Добавить приложения для быстрого запуска", systemImage: "plus.app")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(.white.opacity(0.06)))
+                }
+                .buttonStyle(.plain)
+            } else {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 4) {
+                        ForEach(model.apps, id: \.self) { url in
+                            AppIcon(model: model, url: url)
+                                .transition(.scale(0.5).combined(with: .opacity))
+                        }
+                    }
+                    .padding(.horizontal, 4)
+                    .frame(maxHeight: .infinity)
+                }
+                IconButton(systemName: "plus", size: 11) { model.addApps() }
+                    .foregroundStyle(.secondary)
+                    .help("Добавить приложение")
+            }
+        }
+    }
+}
+
+private struct AppIcon: View {
+    @ObservedObject var model: IslandModel
+    let url: URL
+    @State private var hover = false
+
+    var body: some View {
+        let id = model.bundleID(for: url)
+        let running = id.map { model.runningBundleIDs.contains($0) } ?? false
+        let front = id != nil && id == model.frontmostBundleID
+
+        VStack(spacing: 2) {
+            Image(nsImage: model.icon(for: url))
+                .resizable()
+                .frame(width: 28, height: 28)
+                .scaleEffect(hover ? 1.18 : 1, anchor: .bottom)
+            Circle()
+                .fill(.white.opacity(front ? 0.95 : 0.45))
+                .frame(width: 3.5, height: 3.5)
+                .opacity(running ? 1 : 0)
+        }
+        .frame(width: 36)
+        .contentShape(Rectangle())
+        .onHover { h in withAnimation(.spring(duration: 0.25, bounce: 0.4)) { hover = h } }
+        .onTapGesture { model.launch(url) }
+        .contextMenu {
+            Button("Открыть") { model.launch(url) }
+            Button("Показать в Finder") { NSWorkspace.shared.activateFileViewerSelecting([url]) }
+            Divider()
+            Button("Левее") { model.moveApp(url, by: -1) }
+            Button("Правее") { model.moveApp(url, by: 1) }
+            Divider()
+            Button("Убрать из панели") { model.removeApp(url) }
+        }
+        .help(url.deletingPathExtension().lastPathComponent)
+    }
+}
+
+// MARK: - Shelf
+
+struct ShelfPanel: View {
+    @ObservedObject var model: IslandModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                Text("Полка").font(.system(size: 13, weight: .semibold))
+                Text("\(model.shelf.count)").font(.system(size: 11, weight: .medium).monospacedDigit()).foregroundStyle(.secondary)
+                Spacer()
+                IconButton(systemName: "paperplane", size: 10) { model.airDrop(urls: model.shelf) }
+                    .foregroundStyle(.secondary)
+                    .help("Отправить всё по AirDrop")
+                IconButton(systemName: "trash", size: 10) { model.clearShelf() }
+                    .foregroundStyle(.secondary)
+                    .help("Очистить полку")
+            }
+            .padding(.horizontal, 8)
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    ForEach(model.shelf, id: \.self) { url in
+                        ShelfItem(model: model, url: url)
+                            .transition(.scale(0.6).combined(with: .opacity))
+                    }
+                }
+                .padding(.horizontal, 6)
+            }
+        }
+        .padding(.top, 8)
+        .padding(.bottom, 6)
+        .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(.white.opacity(0.06)))
+    }
+}
+
+struct ShelfItem: View {
+    @ObservedObject var model: IslandModel
+    let url: URL
+    @State private var hover = false
+
+    var body: some View {
+        VStack(spacing: 3) {
+            Image(nsImage: NSWorkspace.shared.icon(forFile: url.path))
+                .resizable()
+                .frame(width: 38, height: 38)
+            Text(url.lastPathComponent)
+                .font(.system(size: 10))
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .frame(width: 64)
+        }
+        .padding(.vertical, 4)
+        .padding(.horizontal, 2)
+        .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(.white.opacity(hover ? 0.08 : 0)))
+        .overlay(alignment: .topTrailing) {
+            if hover {
+                Button { model.removeFromShelf(url) } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 13))
+                        .symbolRenderingMode(.palette)
+                        .foregroundStyle(.white, .gray)
+                }
+                .buttonStyle(.plain)
+                .offset(x: 2, y: -2)
+            }
+        }
+        .contentShape(Rectangle())
+        .onHover { h in withAnimation(.easeOut(duration: 0.12)) { hover = h } }
+        .onTapGesture(count: 2) { NSWorkspace.shared.open(url) }
+        .onDrag {
+            model.beginDragOut()
+            return NSItemProvider(contentsOf: url) ?? NSItemProvider()
+        }
+        .contextMenu {
+            Button("Открыть") { NSWorkspace.shared.open(url) }
+            Button("Показать в Finder") { NSWorkspace.shared.activateFileViewerSelecting([url]) }
+            Button("Отправить по AirDrop") { model.airDrop(urls: [url]) }
+            Divider()
+            Button("Убрать с полки") { model.removeFromShelf(url) }
+        }
+        .help(url.path)
+    }
+}
+
+// MARK: - Device peek
+
+struct DevicePeekView: View {
+    @ObservedObject var model: IslandModel
+    let event: DeviceEvent
+
+    var body: some View {
+        EarsLayout(notchWidth: model.notchSize.width, height: model.notchSize.height) {
+            HStack(spacing: 7) {
+                Image(systemName: event.symbol)
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundStyle(event.connected ? .white : .secondary)
+                Text(event.name)
+                    .font(.system(size: 12, weight: .medium))
+                    .lineLimit(1)
+                    .foregroundStyle(event.connected ? .primary : .secondary)
+            }
+            .padding(.leading, 14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        } right: {
+            Group {
+                if !event.connected {
+                    Text("Отключено").foregroundStyle(.secondary)
+                } else if let battery = event.battery {
+                    HStack(spacing: 5) {
+                        Text("\(battery)%").foregroundStyle(battery <= 20 ? .red : .green)
+                        BatteryGlyph(battery: Battery(level: battery, isCharging: false, onAC: false, hasBattery: true))
+                    }
+                    .help(event.detail ?? "")
+                } else if let detail = event.detail {
+                    Text(detail).foregroundStyle(.secondary).lineLimit(1)
+                } else {
+                    Label("Подключено", systemImage: "checkmark.circle.fill")
+                        .labelStyle(.titleAndIcon)
+                        .foregroundStyle(.green)
+                }
+            }
+            .font(.system(size: 12, weight: .semibold).monospacedDigit())
+            .padding(.trailing, 14)
+            .frame(maxWidth: .infinity, alignment: .trailing)
         }
     }
 }
@@ -427,8 +664,9 @@ struct TrackList: View {
     let tracks: [PlaylistTrack]
 
     private var currentID: String? {
-        guard let uri = model.nowPlaying?.trackURI else { return nil }
-        return tracks.first { $0.uri == uri }?.id
+        guard let np = model.nowPlaying,
+              let i = IslandModel.index(of: np.trackURI, name: np.title, in: tracks) else { return nil }
+        return tracks[i].id
     }
 
     var body: some View {

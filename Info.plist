@@ -10,6 +10,7 @@
     <key>CFBundleVersion</key><string>1</string>
     <key>LSMinimumSystemVersion</key><string>14.0</string>
     <key>LSUIElement</key><true/>
+    <key>NSBluetoothAlwaysUsageDescription</key><string>NotchIsland показывает, когда подключаются AirPods и другие Bluetooth-устройства.</string>
     <key>NSAppleEventsUsageDescription</key><string>NotchIsland показывает текущий трек и управляет воспроизведением в Музыке и Spotify.</string>
 </dict>
 </plist>

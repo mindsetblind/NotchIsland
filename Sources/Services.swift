@@ -115,8 +115,9 @@ final class MediaService {
     }
 
     /// Fast, direct read of Spotify's current track (used while skipping through the queue).
-    func currentSpotifyTrackURI() -> String? {
-        run("tell application \"Spotify\" to id of current track")?.stringValue
+    func currentSpotifyTrack() -> (uri: String?, name: String?) {
+        let d = run("tell application \"Spotify\" to {id of current track, name of current track}")
+        return (d?.atIndex(1)?.stringValue, d?.atIndex(2)?.stringValue)
     }
 
     func seekToStart(_ source: MediaSource) {

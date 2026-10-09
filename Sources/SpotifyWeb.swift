@@ -8,6 +8,8 @@ import Security
 struct PlaylistTrack: Identifiable, Equatable {
     let id: String          // position-based, playlists may contain the same track twice
     let uri: String
+    /// Spotify may play a "relinked" copy of the same song (another release/market) under a different ID.
+    let linkedURI: String?
     let name: String
     let artist: String
     let duration: Double
@@ -252,7 +254,7 @@ final class SpotifyWeb {
     }
 
     private func playlist(id: String, uri: String) async throws -> PlaybackContext {
-        guard let p = try await get("/playlists/\(id)") else { throw SpotifyError.badResponse }
+        guard let p = try await get("/playlists/\(id)?market=from_token") else { throw SpotifyError.badResponse }
         let title = p["name"] as? String ?? "Плейлист"
         // The tracks page is called "tracks" in the classic API and "items" in the newer one.
         var page = (p["tracks"] as? [String: Any]) ?? (p["items"] as? [String: Any])
@@ -265,14 +267,14 @@ final class SpotifyWeb {
     }
 
     private func album(id: String, uri: String) async throws -> PlaybackContext {
-        guard let a = try await get("/albums/\(id)") else { throw SpotifyError.badResponse }
+        guard let a = try await get("/albums/\(id)?market=from_token") else { throw SpotifyError.badResponse }
         let image = Self.smallestImage(a["images"])
         let tracks = try await collect(firstPage: a["tracks"] as? [String: Any], fallbackImage: image)
         return PlaybackContext(uri: uri, title: a["name"] as? String ?? "Альбом", tracks: tracks)
     }
 
     private func queue() async throws -> PlaybackContext {
-        let q = try await get("/me/player/queue")
+        let q = try await get("/me/player/queue?market=from_token")
         var raw: [[String: Any]] = []
         if let cur = q?["currently_playing"] as? [String: Any] { raw.append(cur) }
         raw += q?["queue"] as? [[String: Any]] ?? []
@@ -304,6 +306,7 @@ final class SpotifyWeb {
         return PlaylistTrack(
             id: "\(index)-\(uri)",
             uri: uri,
+            linkedURI: (t["linked_from"] as? [String: Any])?["uri"] as? String,
             name: name,
             artist: artists?.joined(separator: ", ") ?? show ?? "",
             duration: (t["duration_ms"] as? Double ?? 0) / 1000,

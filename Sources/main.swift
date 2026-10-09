@@ -35,7 +35,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var dragWatch: Timer?
     private var leftAt: Date?
 
-    private let canvasSize = CGSize(width: 760, height: 460)
+    private let canvasSize = CGSize(width: 760, height: 640)
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         panel = IslandPanel(contentRect: NSRect(origin: .zero, size: canvasSize))
@@ -61,6 +61,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.trackMouse()
             return event
         }
+        model.onDragOutEnded = { [weak self] in self?.trackMouse() }
         model.start()
     }
 
@@ -140,7 +141,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         } else {
             enteredAt = nil
             model.setHoverHint(false)
-            if model.isExpanded {
+            if model.isExpanded && !model.dragOutActive {
                 if leftAt == nil { leftAt = now }
                 if now.timeIntervalSince(leftAt!) > 0.25 { model.setHovering(false) }
             }

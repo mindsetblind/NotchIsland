@@ -1,10 +1,12 @@
 import AppKit
+import UniformTypeIdentifiers
 import SwiftUI
 
 enum IslandState: Equatable {
     case idle        // looks exactly like the hardware notch
     case music       // small live activity: artwork + equalizer
     case charging    // short peek after plugging in power
+    case device      // short peek when a Bluetooth device / drive connects or disconnects
     case expanded    // hover
     case drop        // files are being dragged near the notch → AirDrop target
 }
@@ -15,6 +17,20 @@ final class IslandModel: ObservableObject {
     /// Pointer is over the notch but hasn't expanded it yet: the island "swells" a little.
     @Published private(set) var hoverHint = false
     @Published private(set) var chargingPeek = false
+    @Published private(set) var devicePeek: DeviceEvent?
+    /// Files parked on the shelf (persisted between launches).
+    @Published private(set) var shelf: [URL] = []
+    /// Quick-launch apps shown under the player (persisted).
+    @Published private(set) var apps: [URL] = []
+    @Published private(set) var runningBundleIDs: Set<String> = []
+    @Published private(set) var frontmostBundleID: String?
+    private var appIcons: [URL: NSImage] = [:]
+    private var appBundleIDs: [URL: String] = [:]
+    /// A file is being dragged *out* of the shelf: keep the island open until the mouse is released.
+    private(set) var dragOutActive = false
+    var onDragOutEnded: (() -> Void)?
+    private let devices = DeviceMonitor()
+    private var devicePeekWork: DispatchWorkItem?
     @Published private(set) var fileDragActive = false
     @Published private(set) var dropNear = false
     @Published private(set) var nowPlaying: NowPlaying?
@@ -36,6 +52,7 @@ final class IslandModel: ObservableObject {
     private var artworkKey: String?
     private var playlistTask: Task<Void, Never>?
     private var skipTask: Task<Void, Never>?
+    private var lastListReloadKey: String?
     /// Track the queue-skipper is currently heading to (shown with a spinner in the list).
     @Published private(set) var skipTargetID: String?
 
@@ -57,6 +74,7 @@ final class IslandModel: ObservableObject {
         if fileDragActive && dropNear { return .drop }
         if hovering { return .expanded }
         if chargingPeek { return .charging }
+        if devicePeek != nil { return .device }
         if nowPlaying?.isPlaying == true { return .music }
         return .idle
     }
@@ -79,16 +97,22 @@ final class IslandModel: ObservableObject {
     static let contentTop: CGFloat = 10     // below the header row (its text already sits mid-row)
     static let contentBottom: CGFloat = 20
     static let playlistHeight: CGFloat = 230
+    static let shelfHeight: CGFloat = 104
+    static let launcherHeight: CGFloat = 36
+    static let launcherGap: CGFloat = 12     // between the player and the app row
 
     func size(for state: IslandState) -> CGSize {
         switch state {
         case .idle:     return notchSize
         case .music:    return CGSize(width: notchSize.width + 2 * 40, height: notchSize.height)
         case .charging: return CGSize(width: notchSize.width + 2 * 70, height: notchSize.height)
-        case .drop:     return CGSize(width: max(440, notchSize.width + 250), height: notchSize.height + 112)
+        case .device:   return CGSize(width: notchSize.width + 2 * 125, height: notchSize.height)
+        case .drop:     return CGSize(width: max(540, notchSize.width + 350), height: notchSize.height + 112)
         case .expanded: return CGSize(width: max(480, notchSize.width + 290),
-                                     height: notchSize.height + Self.contentTop + Self.artworkSize + Self.contentBottom
-                                        + (showPlaylist ? Self.playlistHeight + Self.contentBottom : 0))
+                                     height: notchSize.height + Self.contentTop + Self.artworkSize
+                                        + Self.launcherGap + Self.launcherHeight + Self.contentBottom
+                                        + (showPlaylist ? Self.playlistHeight + Self.contentBottom : 0)
+                                        + (shelf.isEmpty ? 0 : Self.shelfHeight + Self.contentBottom))
         }
     }
 
@@ -96,6 +120,10 @@ final class IslandModel: ObservableObject {
     var bottomRadius: CGFloat { isLarge ? 30 : 12 }
 
     func start() {
+        loadShelf()
+        loadApps()
+        devices.onEvent = { [weak self] event in self?.showDevicePeek(event) }
+        devices.start()
         refreshMedia()
         timers.append(Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
             self?.refreshMedia()
@@ -135,8 +163,11 @@ final class IslandModel: ObservableObject {
             return
         }
         // The track moved somewhere outside the list we show (user picked another playlist) → reload.
-        if showPlaylist, !playlistLoading, skipTask == nil, let uri = np.trackURI,
-           let list = playlist, !list.tracks.contains(where: { $0.uri == uri }) {
+        // Reload only once per track change — a track we can't match must not cause a reload loop.
+        if showPlaylist, !playlistLoading, skipTask == nil, let list = playlist,
+           np.trackKey != lastListReloadKey,
+           Self.index(of: np.trackURI, name: np.title, in: list.tracks) == nil {
+            lastListReloadKey = np.trackKey
             loadPlaylist()
         }
         if np.trackKey != artworkKey {
@@ -158,6 +189,13 @@ final class IslandModel: ObservableObject {
 
     // MARK: - Spotify playlist
 
+    /// Finds the playing track in a list: by ID, by the ID Spotify relinked it from, then by title.
+    static func index(of uri: String?, name: String?, in tracks: [PlaylistTrack]) -> Int? {
+        if let uri, let i = tracks.firstIndex(where: { $0.uri == uri || $0.linkedURI == uri }) { return i }
+        guard let name = name?.lowercased(), !name.isEmpty else { return nil }
+        return tracks.firstIndex { $0.name.lowercased() == name }
+    }
+
     func togglePlaylist() {
         withAnimation(Self.open) { showPlaylist.toggle() }
         if showPlaylist { loadPlaylist(onlyIfStale: true) }
@@ -165,8 +203,8 @@ final class IslandModel: ObservableObject {
 
     func loadPlaylist(onlyIfStale: Bool = false) {
         guard spotifyHasClientID, spotifyLoggedIn else { return }
-        if onlyIfStale, let list = playlist, let uri = nowPlaying?.trackURI,
-           list.tracks.contains(where: { $0.uri == uri }) { return }
+        if onlyIfStale, let list = playlist, let np = nowPlaying,
+           Self.index(of: np.trackURI, name: np.title, in: list.tracks) != nil { return }
         playlistTask?.cancel()
         playlistLoading = true
         playlistError = nil
@@ -219,8 +257,8 @@ final class IslandModel: ObservableObject {
             while let targetID = skipTargetID, steps < 100 {
                 guard let list = playlist,
                       let target = list.tracks.firstIndex(where: { $0.id == targetID }),
-                      let uri = media.currentSpotifyTrackURI(),
-                      let current = list.tracks.firstIndex(where: { $0.uri == uri }),
+                      case let now = media.currentSpotifyTrack(),
+                      let current = Self.index(of: now.uri, name: now.name, in: list.tracks),
                       current != target else { break }
                 let forward = target > current
                 // "Previous" first restarts the current track, so rewind it before stepping back.
@@ -230,8 +268,12 @@ final class IslandModel: ObservableObject {
                 // Wait until Spotify has actually switched (up to ~0.6 s) before deciding the next step.
                 for _ in 0..<12 {
                     try? await Task.sleep(for: .milliseconds(50))
-                    if media.currentSpotifyTrackURI() != uri { break }
+                    if media.currentSpotifyTrack().uri != now.uri { break }
                 }
+            }
+            if steps == 0 {
+                let now = media.currentSpotifyTrack()
+                debugLog("queue skip: current \(now.uri ?? "-") «\(now.name ?? "")» not found in list")
             }
             debugLog("queue skip done after \(steps) step(s)")
             skipTargetID = nil
@@ -283,6 +325,20 @@ final class IslandModel: ObservableObject {
 
     /// Collects the dropped file URLs and hands them to the system AirDrop sheet.
     func airDrop(_ providers: [NSItemProvider]) {
+        Self.loadFileURLs(providers) { [weak self] urls in
+            self?.setFileDrag(false)
+            self?.airDrop(urls: urls)
+        }
+    }
+
+    func airDrop(urls: [URL]) {
+        guard !urls.isEmpty, let service = NSSharingService(named: .sendViaAirDrop),
+              service.canPerform(withItems: urls) else { return }
+        NSApp.activate(ignoringOtherApps: true)
+        service.perform(withItems: urls)
+    }
+
+    private static func loadFileURLs(_ providers: [NSItemProvider], completion: @escaping ([URL]) -> Void) {
         var urls: [URL] = []
         let group = DispatchGroup()
         for provider in providers {
@@ -294,13 +350,140 @@ final class IslandModel: ObservableObject {
                 }
             }
         }
-        group.notify(queue: .main) { [weak self] in
-            self?.setFileDrag(false)
-            guard !urls.isEmpty, let service = NSSharingService(named: .sendViaAirDrop),
-                  service.canPerform(withItems: urls) else { return }
-            NSApp.activate(ignoringOtherApps: true)
-            service.perform(withItems: urls)
+        group.notify(queue: .main) { completion(urls) }
+    }
+
+    // MARK: - Shelf
+
+    private static let shelfKey = "shelfPaths"
+
+    func addToShelf(_ providers: [NSItemProvider]) {
+        Self.loadFileURLs(providers) { [weak self] urls in
+            guard let self else { return }
+            self.setFileDrag(false)
+            let new = urls.filter { !self.shelf.contains($0) }
+            withAnimation(Self.spring) { self.shelf.append(contentsOf: new) }
+            self.saveShelf()
         }
+    }
+
+    func removeFromShelf(_ url: URL) {
+        withAnimation(Self.spring) { shelf.removeAll { $0 == url } }
+        saveShelf()
+    }
+
+    func clearShelf() {
+        withAnimation(Self.spring) { shelf.removeAll() }
+        saveShelf()
+    }
+
+    private func loadShelf() {
+        let paths = UserDefaults.standard.stringArray(forKey: Self.shelfKey) ?? []
+        // Files that were moved or deleted since are dropped silently.
+        shelf = paths.map { URL(fileURLWithPath: $0) }.filter { FileManager.default.fileExists(atPath: $0.path) }
+    }
+
+    private func saveShelf() {
+        UserDefaults.standard.set(shelf.map(\.path), forKey: Self.shelfKey)
+    }
+
+    func beginDragOut() {
+        guard !dragOutActive else { return }
+        dragOutActive = true
+        Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] timer in
+            guard NSEvent.pressedMouseButtons & 1 == 0 else { return }
+            timer.invalidate()
+            self?.dragOutActive = false
+            self?.onDragOutEnded?()
+        }
+    }
+
+    // MARK: - App launcher
+
+    private static let appsKey = "launcherApps"
+
+    func addApps() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.application]
+        panel.allowsMultipleSelection = true
+        panel.directoryURL = URL(fileURLWithPath: "/Applications")
+        panel.prompt = "Добавить"
+        panel.message = "Выбери приложения для быстрого запуска из острова"
+        NSApp.activate(ignoringOtherApps: true)
+        guard panel.runModal() == .OK else { return }
+        let new = panel.urls.filter { !apps.contains($0) }
+        withAnimation(Self.spring) { apps.append(contentsOf: new) }
+        saveApps()
+    }
+
+    func removeApp(_ url: URL) {
+        withAnimation(Self.spring) { apps.removeAll { $0 == url } }
+        saveApps()
+    }
+
+    func moveApp(_ url: URL, by offset: Int) {
+        guard let i = apps.firstIndex(of: url) else { return }
+        let j = min(max(i + offset, 0), apps.count - 1)
+        guard i != j else { return }
+        withAnimation(Self.spring) { apps.swapAt(i, j) }
+        saveApps()
+    }
+
+    func launch(_ url: URL) {
+        let config = NSWorkspace.OpenConfiguration()
+        config.activates = true
+        NSWorkspace.shared.openApplication(at: url, configuration: config)
+    }
+
+    func icon(for url: URL) -> NSImage {
+        if let cached = appIcons[url] { return cached }
+        let icon = NSWorkspace.shared.icon(forFile: url.path)
+        appIcons[url] = icon
+        return icon
+    }
+
+    func bundleID(for url: URL) -> String? {
+        if let cached = appBundleIDs[url] { return cached }
+        let id = Bundle(url: url)?.bundleIdentifier
+        appBundleIDs[url] = id
+        return id
+    }
+
+    private func loadApps() {
+        let paths = UserDefaults.standard.stringArray(forKey: Self.appsKey) ?? []
+        apps = paths.map { URL(fileURLWithPath: $0) }.filter { FileManager.default.fileExists(atPath: $0.path) }
+
+        let nc = NSWorkspace.shared.notificationCenter
+        for name in [NSWorkspace.didLaunchApplicationNotification,
+                     NSWorkspace.didTerminateApplicationNotification,
+                     NSWorkspace.didActivateApplicationNotification] {
+            nc.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in self?.refreshRunningApps() }
+        }
+        refreshRunningApps()
+    }
+
+    private func refreshRunningApps() {
+        let running = Set(NSWorkspace.shared.runningApplications.compactMap(\.bundleIdentifier))
+        let front = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
+        if running != runningBundleIDs { runningBundleIDs = running }
+        if front != frontmostBundleID { frontmostBundleID = front }
+    }
+
+    private func saveApps() {
+        UserDefaults.standard.set(apps.map(\.path), forKey: Self.appsKey)
+    }
+
+    // MARK: - Devices
+
+    private func showDevicePeek(_ event: DeviceEvent) {
+        devicePeekWork?.cancel()
+        if event.connected { NSHapticFeedbackManager.defaultPerformer.perform(.levelChange, performanceTime: .now) }
+        withAnimation(Self.spring) { devicePeek = event }
+        let work = DispatchWorkItem { [weak self] in
+            withAnimation(Self.spring) { self?.devicePeek = nil }
+        }
+        devicePeekWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3.5, execute: work)
     }
 
     // MARK: - Battery
