@@ -2,3 +2,4 @@
 *.app
 .swiftpm/
 .DS_Store
+Resources/placeholder.mp4

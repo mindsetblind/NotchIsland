@@ -7,6 +7,8 @@ rm -rf $APP
 mkdir -p $APP/Contents/MacOS $APP/Contents/Resources
 cp .build/release/NotchIsland $APP/Contents/MacOS/
 cp Info.plist $APP/Contents/
+# Optional looping video shown while artwork loads (not in git — put your own file there)
+[[ -f Resources/placeholder.mp4 ]] && cp Resources/placeholder.mp4 $APP/Contents/Resources/
 codesign --force --sign - $APP
 echo "Built $APP"
 

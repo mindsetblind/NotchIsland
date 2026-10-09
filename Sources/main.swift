@@ -27,11 +27,12 @@ final class FirstMouseHostingView<Content: View>: NSHostingView<Content> {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var panel: IslandPanel!
     private let model = IslandModel()
-    private var mouseTimer: Timer?
+    /// One-shot re-check while a hover delay is pending (expand after 0.15 s, collapse after 0.25 s).
+    private var recheckTimer: Timer?
     private var enteredAt: Date?
     private var leftAt: Date?
 
-    private let canvasSize = CGSize(width: 760, height: 280)
+    private let canvasSize = CGSize(width: 760, height: 460)
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         panel = IslandPanel(contentRect: NSRect(origin: .zero, size: canvasSize))
@@ -45,8 +46,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                                name: NSApplication.didChangeScreenParametersNotification,
                                                object: nil)
 
-        mouseTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 60.0, repeats: true) { [weak self] _ in
+        // React to real mouse movement instead of polling: zero work while the mouse is still.
+        NSEvent.addGlobalMonitorForEvents(matching: [.mouseMoved, .leftMouseDragged]) { [weak self] _ in
             self?.trackMouse()
+        }
+        NSEvent.addLocalMonitorForEvents(matching: [.mouseMoved, .leftMouseDragged, .mouseExited]) { [weak self] event in
+            self?.trackMouse()
+            return event
         }
         model.start()
     }
@@ -102,6 +108,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 if now.timeIntervalSince(leftAt!) > 0.25 { model.setHovering(false) }
             }
         }
+
+        // The mouse may stop moving while a delay is still running — check again shortly.
+        let pending = (inside && !model.isExpanded) || (!inside && model.isExpanded)
+        recheckTimer?.invalidate()
+        recheckTimer = pending
+            ? Timer.scheduledTimer(withTimeInterval: 0.05, repeats: false) { [weak self] _ in self?.trackMouse() }
+            : nil
     }
 }
 

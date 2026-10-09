@@ -18,10 +18,29 @@ final class IslandModel: ObservableObject {
     @Published private(set) var artwork: NSImage?
     @Published private(set) var battery = Battery.read()
 
+    // Spotify playlist panel
+    @Published private(set) var showPlaylist = false
+    @Published private(set) var playlist: PlaybackContext?
+    @Published private(set) var playlistLoading = false
+    @Published private(set) var playlistError: String?
+    @Published private(set) var spotifyLoggedIn: Bool
+    @Published private(set) var spotifyHasClientID: Bool
+    let spotify = SpotifyWeb()
+
     let media = MediaService()
     private var timers: [Timer] = []
     private var peekWork: DispatchWorkItem?
     private var artworkKey: String?
+    private var playlistTask: Task<Void, Never>?
+    private var skipTask: Task<Void, Never>?
+    /// Track the queue-skipper is currently heading to (shown with a spinner in the list).
+    @Published private(set) var skipTargetID: String?
+
+    init() {
+        // An older login without playback-control permission must be redone once.
+        spotifyLoggedIn = spotify.isLoggedIn && !spotify.needsReauth
+        spotifyHasClientID = spotify.clientID != nil
+    }
 
     /// General state changes (music started, charging peek).
     static let spring = Animation.spring(duration: 0.5, bounce: 0.22)
@@ -54,6 +73,7 @@ final class IslandModel: ObservableObject {
     static let artworkSize: CGFloat = 92
     static let contentTop: CGFloat = 10     // below the header row (its text already sits mid-row)
     static let contentBottom: CGFloat = 20
+    static let playlistHeight: CGFloat = 230
 
     func size(for state: IslandState) -> CGSize {
         switch state {
@@ -61,7 +81,8 @@ final class IslandModel: ObservableObject {
         case .music:    return CGSize(width: notchSize.width + 2 * 40, height: notchSize.height)
         case .charging: return CGSize(width: notchSize.width + 2 * 70, height: notchSize.height)
         case .expanded: return CGSize(width: max(480, notchSize.width + 290),
-                                     height: notchSize.height + Self.contentTop + Self.artworkSize + Self.contentBottom)
+                                     height: notchSize.height + Self.contentTop + Self.artworkSize + Self.contentBottom
+                                        + (showPlaylist ? Self.playlistHeight + Self.contentBottom : 0))
         }
     }
 
@@ -86,6 +107,7 @@ final class IslandModel: ObservableObject {
         withAnimation(value ? Self.open : Self.close) {
             hovering = value
             hoverHint = false
+            if !value { showPlaylist = false }
         }
     }
 
@@ -106,6 +128,11 @@ final class IslandModel: ObservableObject {
             if artwork != nil { artwork = nil }
             return
         }
+        // The track moved somewhere outside the list we show (user picked another playlist) → reload.
+        if showPlaylist, !playlistLoading, skipTask == nil, let uri = np.trackURI,
+           let list = playlist, !list.tracks.contains(where: { $0.uri == uri }) {
+            loadPlaylist()
+        }
         if np.trackKey != artworkKey {
             artworkKey = np.trackKey
             let key = np.trackKey
@@ -121,6 +148,112 @@ final class IslandModel: ObservableObject {
         media.send(command, to: source)
         // Ask again shortly so the UI reflects the new state without waiting a full second.
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in self?.refreshMedia() }
+    }
+
+    // MARK: - Spotify playlist
+
+    func togglePlaylist() {
+        withAnimation(Self.open) { showPlaylist.toggle() }
+        if showPlaylist { loadPlaylist(onlyIfStale: true) }
+    }
+
+    func loadPlaylist(onlyIfStale: Bool = false) {
+        guard spotifyHasClientID, spotifyLoggedIn else { return }
+        if onlyIfStale, let list = playlist, let uri = nowPlaying?.trackURI,
+           list.tracks.contains(where: { $0.uri == uri }) { return }
+        playlistTask?.cancel()
+        playlistLoading = true
+        playlistError = nil
+        playlistTask = Task { @MainActor in
+            do {
+                let ctx = try await spotify.currentContext()
+                guard !Task.isCancelled else { return }
+                withAnimation(.easeInOut(duration: 0.2)) { playlist = ctx }
+            } catch SpotifyError.notLoggedIn {
+                spotifyLoggedIn = false
+            } catch {
+                if !Task.isCancelled { playlistError = error.localizedDescription }
+            }
+            playlistLoading = false
+        }
+    }
+
+    func play(_ track: PlaylistTrack) {
+        guard let list = playlist else { return }
+        if list.uri == nil {
+            skipInQueue(to: track, in: list)
+            return
+        }
+        Task { @MainActor in
+            do {
+                try await spotify.play(trackURI: track.uri, contextURI: list.uri)
+                try? await Task.sleep(for: .milliseconds(350))
+                refreshMedia()
+                try? await Task.sleep(for: .seconds(1))
+                debugLog("after play: \(await spotify.playerSummary())")
+            } catch SpotifyError.notLoggedIn {
+                spotifyLoggedIn = false
+            } catch {
+                playlistError = error.localizedDescription
+            }
+        }
+    }
+
+    /// Queue view (context Spotify won't let us read or start remotely): reach the chosen track by
+    /// pressing next/previous — exactly what Spotify would play anyway.
+    /// The loop re-checks the real current track after every step, so a new click simply changes
+    /// the target mid-way (you can change your mind, or click the playing track to stop).
+    private func skipInQueue(to track: PlaylistTrack, in list: PlaybackContext) {
+        guard list.tracks.contains(where: { $0.id == track.id }) else { return }
+        skipTargetID = track.id
+        guard skipTask == nil else { return }   // running loop picks up the new target
+
+        skipTask = Task { @MainActor in
+            var steps = 0
+            while let targetID = skipTargetID, steps < 100 {
+                guard let list = playlist,
+                      let target = list.tracks.firstIndex(where: { $0.id == targetID }),
+                      let uri = media.currentSpotifyTrackURI(),
+                      let current = list.tracks.firstIndex(where: { $0.uri == uri }),
+                      current != target else { break }
+                let forward = target > current
+                // "Previous" first restarts the current track, so rewind it before stepping back.
+                if !forward { media.seekToStart(.spotify) }
+                media.send(forward ? .next : .previous, to: .spotify)
+                steps += 1
+                // Wait until Spotify has actually switched (up to ~0.6 s) before deciding the next step.
+                for _ in 0..<12 {
+                    try? await Task.sleep(for: .milliseconds(50))
+                    if media.currentSpotifyTrackURI() != uri { break }
+                }
+            }
+            debugLog("queue skip done after \(steps) step(s)")
+            skipTargetID = nil
+            skipTask = nil
+            refreshMedia()
+            try? await Task.sleep(for: .milliseconds(500))
+            loadPlaylist()   // the queue shifted; refetch it
+        }
+    }
+
+    func spotifyLogin() {
+        spotify.login { [weak self] error in
+            guard let self else { return }
+            self.spotifyLoggedIn = self.spotify.isLoggedIn && !self.spotify.needsReauth
+            self.playlistError = error?.localizedDescription
+            if error == nil { self.loadPlaylist() }
+        }
+    }
+
+    func spotifyLogout() {
+        spotify.logout()
+        spotifyLoggedIn = false
+        playlist = nil
+    }
+
+    func setSpotifyClientID(_ id: String?) {
+        spotify.clientID = id
+        spotifyHasClientID = spotify.clientID != nil
     }
 
     // MARK: - Battery

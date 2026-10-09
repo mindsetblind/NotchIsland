@@ -51,6 +51,11 @@ struct IslandView: View {
         .foregroundStyle(.white)
         .environment(\.colorScheme, .dark)
         .contextMenu {
+            Button("Spotify Client ID…") { SpotifySettings.askClientID(model: model) }
+            if model.spotifyLoggedIn {
+                Button("Выйти из Spotify") { model.spotifyLogout() }
+            }
+            Divider()
             Toggle("Запускать при входе", isOn: Binding(
                 get: { LoginItem.isEnabled },
                 set: { LoginItem.setEnabled($0) }
@@ -136,7 +141,7 @@ struct CompactMusicView: View {
         EarsLayout(notchWidth: model.notchSize.width, height: model.notchSize.height) {
             ArtworkView(image: model.artwork, size: 20, corner: 5)
         } right: {
-            EqualizerView(isPlaying: model.nowPlaying?.isPlaying ?? false, tint: .green)
+            EqualizerView(isPlaying: model.nowPlaying?.isPlaying ?? false, tint: .white)
                 .frame(width: 18, height: 14)
         }
     }
@@ -170,24 +175,10 @@ struct ExpandedView: View {
     var body: some View {
         VStack(spacing: 0) {
             EarsLayout(notchWidth: model.notchSize.width, height: model.notchSize.height) {
-                HStack {
-                    Text(Date.now, format: .dateTime.weekday(.wide).day().month(.wide))
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                }
-                .padding(.leading, IslandModel.inset)
+                Color.clear
             } right: {
-                HStack(spacing: 10) {
+                HStack {
                     Spacer()
-                    if model.battery.hasBattery {
-                        HStack(spacing: 5) {
-                            Text("\(model.battery.level)%")
-                                .font(.system(size: 12, weight: .medium).monospacedDigit())
-                                .foregroundStyle(.secondary)
-                            BatteryGlyph(battery: model.battery)
-                        }
-                    }
                     IconButton(systemName: "power", size: 11) { NSApp.terminate(nil) }
                         .help("Выйти")
                 }
@@ -199,6 +190,14 @@ struct ExpandedView: View {
                 .padding(.horizontal, IslandModel.inset)
                 .padding(.top, IslandModel.contentTop)
                 .padding(.bottom, IslandModel.contentBottom)
+
+            if model.showPlaylist {
+                PlaylistPanel(model: model)
+                    .frame(height: IslandModel.playlistHeight)
+                    .padding(.horizontal, IslandModel.inset - 8)
+                    .padding(.bottom, IslandModel.contentBottom)
+                    .transition(.islandContent(scale: 0.96))
+            }
         }
     }
 }
@@ -220,7 +219,7 @@ struct MediaPanel: View {
                             Text(np.artist).font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(1)
                         }
                         Spacer(minLength: 6)
-                        EqualizerView(isPlaying: np.isPlaying, tint: .green).frame(width: 16, height: 12).padding(.top, 3)
+                        EqualizerView(isPlaying: np.isPlaying, tint: .white).frame(width: 16, height: 12).padding(.top, 3)
                     }
                     Spacer(minLength: 0)
                     ProgressRow(np: np)
@@ -232,6 +231,13 @@ struct MediaPanel: View {
                         IconButton(systemName: "forward.fill", size: 16) { model.perform(.next) }
                     }
                     .frame(maxWidth: .infinity)
+                    .overlay(alignment: .trailing) {
+                        if np.source == .spotify {
+                            IconButton(systemName: "list.bullet", size: 13) { model.togglePlaylist() }
+                                .foregroundStyle(model.showPlaylist ? Color.white : Color.white.opacity(0.55))
+                                .help("Плейлист")
+                        }
+                    }
                     .padding(.bottom, -5) // optical: icon buttons carry 5pt of hit padding below the glyph
                 }
             }
@@ -287,6 +293,181 @@ struct ProgressRow: View {
     }
 }
 
+// MARK: - Spotify playlist
+
+struct PlaylistPanel: View {
+    @ObservedObject var model: IslandModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                Text(model.playlist?.title ?? "Плейлист")
+                    .font(.system(size: 13, weight: .semibold))
+                    .lineLimit(1)
+                if let n = model.playlist?.tracks.count, n > 0 {
+                    Text("\(n)").font(.system(size: 11, weight: .medium).monospacedDigit()).foregroundStyle(.secondary)
+                }
+                Spacer()
+                if model.playlistLoading {
+                    ProgressView().controlSize(.mini)
+                } else if model.spotifyLoggedIn {
+                    IconButton(systemName: "arrow.clockwise", size: 10) { model.loadPlaylist() }
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .padding(.horizontal, 8)
+
+            content
+        }
+        .padding(.top, 8)
+        .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(.white.opacity(0.06)))
+    }
+
+    @ViewBuilder private var content: some View {
+        if !model.spotifyHasClientID {
+            Placeholder(text: "Укажи Spotify Client ID: правый клик по острову → «Spotify Client ID…»") {
+                PillButton(title: "Указать") { SpotifySettings.askClientID(model: model) }
+            }
+        } else if !model.spotifyLoggedIn {
+            Placeholder(text: "Войди в Spotify, чтобы видеть треки плейлиста") {
+                PillButton(title: "Войти в Spotify") { model.spotifyLogin() }
+            }
+        } else if let error = model.playlistError {
+            Placeholder(text: error) {
+                PillButton(title: "Повторить") { model.loadPlaylist() }
+            }
+        } else if let list = model.playlist {
+            TrackList(model: model, tracks: list.tracks)
+        } else {
+            Spacer()
+        }
+    }
+}
+
+private struct Placeholder<Action: View>: View {
+    let text: String
+    @ViewBuilder var action: Action
+
+    var body: some View {
+        VStack(spacing: 10) {
+            Text(text)
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+            action
+        }
+        .padding(.horizontal, 20)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+struct TrackList: View {
+    @ObservedObject var model: IslandModel
+    let tracks: [PlaylistTrack]
+
+    private var currentID: String? {
+        guard let uri = model.nowPlaying?.trackURI else { return nil }
+        return tracks.first { $0.uri == uri }?.id
+    }
+
+    var body: some View {
+        ScrollViewReader { proxy in
+            ScrollView(showsIndicators: false) {
+                LazyVStack(spacing: 2) {
+                    ForEach(tracks) { track in
+                        TrackRow(track: track,
+                                 isCurrent: track.id == currentID,
+                                 isPending: track.id == model.skipTargetID && track.id != currentID,
+                                 isPlaying: model.nowPlaying?.isPlaying ?? false) { model.play(track) }
+                            .id(track.id)
+                    }
+                }
+                .padding(.horizontal, 4)
+                .padding(.bottom, 6)
+            }
+            .onAppear { if let id = currentID { proxy.scrollTo(id, anchor: .center) } }
+            .onChange(of: currentID) { _, id in
+                guard let id else { return }
+                withAnimation(.spring(duration: 0.4, bounce: 0.1)) { proxy.scrollTo(id, anchor: .center) }
+            }
+        }
+    }
+}
+
+struct TrackRow: View {
+    let track: PlaylistTrack
+    let isCurrent: Bool
+    let isPending: Bool
+    let isPlaying: Bool
+    let action: () -> Void
+    @State private var hover = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 10) {
+                AsyncImage(url: track.imageURL) { image in
+                    image.resizable().aspectRatio(contentMode: .fill)
+                } placeholder: {
+                    ArtworkPlaceholder(corner: 6)
+                }
+                .frame(width: 32, height: 32)
+                .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(track.name)
+                        .font(.system(size: 12, weight: isCurrent ? .semibold : .medium))
+                        .lineLimit(1)
+                    Text(track.artist)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                Spacer(minLength: 8)
+                if isCurrent {
+                    EqualizerView(isPlaying: isPlaying, tint: .white).frame(width: 14, height: 11)
+                } else if isPending {
+                    ProgressView().controlSize(.mini)
+                } else {
+                    Text(Self.format(track.duration))
+                        .font(.system(size: 11).monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .padding(.horizontal, 6)
+            .padding(.vertical, 4)
+            .background(RoundedRectangle(cornerRadius: 9, style: .continuous)
+                .fill(.white.opacity(isCurrent ? 0.12 : (isPending ? 0.09 : (hover ? 0.07 : 0)))))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hover = $0 }
+    }
+
+    private static func format(_ t: Double) -> String {
+        let s = Int(t)
+        return String(format: "%d:%02d", s / 60, s % 60)
+    }
+}
+
+enum SpotifySettings {
+    static func askClientID(model: IslandModel) {
+        let alert = NSAlert()
+        alert.messageText = "Spotify Client ID"
+        alert.informativeText = "Создай приложение на developer.spotify.com/dashboard с Redirect URI \(SpotifyWeb.redirectURI) и вставь сюда его Client ID."
+        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 300, height: 24))
+        field.stringValue = model.spotify.clientID ?? ""
+        field.placeholderString = "Client ID"
+        alert.accessoryView = field
+        alert.addButton(withTitle: "Сохранить")
+        alert.addButton(withTitle: "Отмена")
+        NSApp.activate(ignoringOtherApps: true)
+        alert.window.initialFirstResponder = field
+        if alert.runModal() == .alertFirstButtonReturn {
+            model.setSpotifyClientID(field.stringValue)
+        }
+    }
+}
+
 // MARK: - Small components
 
 struct ArtworkView: View {
@@ -299,10 +480,7 @@ struct ArtworkView: View {
             if let image {
                 Image(nsImage: image).resizable().aspectRatio(contentMode: .fill)
             } else {
-                ZStack {
-                    LinearGradient(colors: [.purple, .blue], startPoint: .topLeading, endPoint: .bottomTrailing)
-                    Image(systemName: "music.note").font(.system(size: size * 0.45)).foregroundStyle(.white.opacity(0.8))
-                }
+                ArtworkPlaceholder(corner: corner)
             }
         }
         .frame(width: size, height: size)
@@ -310,27 +488,76 @@ struct ArtworkView: View {
     }
 }
 
-struct EqualizerView: View {
+/// Bouncing bars animated by Core Animation: the system render server drives them,
+/// so the app does no per-frame work at all while music plays.
+struct EqualizerView: NSViewRepresentable {
     let isPlaying: Bool
     let tint: Color
-    private let phases: [Double] = [0, 1.7, 0.9, 2.6]
 
-    var body: some View {
-        TimelineView(.animation(paused: !isPlaying)) { ctx in
-            let t = ctx.date.timeIntervalSinceReferenceDate
-            GeometryReader { geo in
-                HStack(alignment: .center, spacing: geo.size.width * 0.12) {
-                    ForEach(phases.indices, id: \.self) { i in
-                        // Two overlapping waves per bar look organic instead of mechanically bouncing.
-                        let w = 0.5 + 0.3 * sin(t * (3.1 + Double(i) * 0.7) + phases[i])
-                                    + 0.2 * sin(t * (7.3 - Double(i) * 0.9) + phases[i] * 2)
-                        let v = isPlaying ? 0.25 + 0.75 * w : 0.2
-                        Capsule().fill(tint).frame(height: geo.size.height * v)
-                    }
-                }
-                .frame(maxHeight: .infinity)
+    func makeNSView(context: Context) -> EqualizerNSView { EqualizerNSView() }
+
+    func updateNSView(_ view: EqualizerNSView, context: Context) {
+        view.update(color: NSColor(tint).cgColor, playing: isPlaying)
+    }
+}
+
+final class EqualizerNSView: NSView {
+    private var bars: [CALayer] = []
+    private var playing: Bool?
+    // Each bar gets its own rhythm so the motion looks organic rather than in lockstep.
+    private static let rhythms: [(values: [CGFloat], duration: Double)] = [
+        ([0.35, 0.9, 0.5, 1.0, 0.4, 0.75, 0.35], 1.3),
+        ([0.8, 0.4, 1.0, 0.55, 0.9, 0.3, 0.8], 1.1),
+        ([0.5, 1.0, 0.35, 0.8, 0.45, 0.95, 0.5], 1.45),
+        ([0.9, 0.45, 0.7, 0.3, 1.0, 0.6, 0.9], 1.2),
+    ]
+
+    init() {
+        super.init(frame: .zero)
+        wantsLayer = true
+        for _ in Self.rhythms.indices {
+            let bar = CALayer()
+            layer?.addSublayer(bar)
+            bars.append(bar)
+        }
+    }
+
+    required init?(coder: NSCoder) { fatalError() }
+
+    override func layout() {
+        super.layout()
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        let n = CGFloat(bars.count)
+        let gap = bounds.width * 0.12
+        let w = (bounds.width - gap * (n - 1)) / n
+        for (i, bar) in bars.enumerated() {
+            bar.bounds = CGRect(x: 0, y: 0, width: w, height: bounds.height)
+            bar.position = CGPoint(x: CGFloat(i) * (w + gap) + w / 2, y: bounds.midY)
+            bar.cornerRadius = w / 2
+        }
+        CATransaction.commit()
+    }
+
+    func update(color: CGColor, playing: Bool) {
+        bars.forEach { $0.backgroundColor = color }
+        guard playing != self.playing else { return }
+        self.playing = playing
+        for (i, bar) in bars.enumerated() {
+            bar.removeAllAnimations()
+            if playing {
+                let r = Self.rhythms[i]
+                let anim = CAKeyframeAnimation(keyPath: "transform.scale.y")
+                anim.values = r.values
+                anim.duration = r.duration
+                anim.calculationMode = .cubic
+                anim.repeatCount = .infinity
+                bar.add(anim, forKey: "bounce")
+            } else {
+                bar.transform = CATransform3DMakeScale(1, 0.2, 1)
             }
         }
+        if playing { bars.forEach { $0.transform = CATransform3DIdentity } }
     }
 }
 

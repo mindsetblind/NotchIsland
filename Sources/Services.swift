@@ -30,6 +30,7 @@ struct NowPlaying: Equatable {
     var position: Double
     var isPlaying: Bool
     var artworkURL: String?
+    var trackURI: String?      // "spotify:track:…" (Spotify only)
     var fetchedAt: Date
 
     var trackKey: String { "\(source.rawValue)|\(title)|\(artist)|\(album)" }
@@ -68,7 +69,7 @@ final class MediaService {
     tell application "Spotify"
         if player state is stopped then return {"stopped"}
         set t to current track
-        return {player state as string, name of t, artist of t, album of t, (duration of t) / 1000, player position, artwork url of t}
+        return {player state as string, name of t, artist of t, album of t, (duration of t) / 1000, player position, artwork url of t, id of t}
     end tell
     """
 
@@ -76,7 +77,7 @@ final class MediaService {
     tell application "Music"
         if player state is stopped then return {"stopped"}
         set t to current track
-        return {player state as string, name of t, artist of t, album of t, duration of t, player position, ""}
+        return {player state as string, name of t, artist of t, album of t, duration of t, player position, "", ""}
     end tell
     """
 
@@ -98,6 +99,7 @@ final class MediaService {
             position: d.atIndex(6)?.doubleValue ?? 0,
             isPlaying: state == "playing",
             artworkURL: d.atIndex(7)?.stringValue.flatMap { $0.isEmpty ? nil : $0 },
+            trackURI: d.numberOfItems >= 8 ? d.atIndex(8)?.stringValue.flatMap { $0.isEmpty ? nil : $0 } : nil,
             fetchedAt: Date()
         )
     }
@@ -110,6 +112,15 @@ final class MediaService {
         case .previous: verb = "previous track"
         }
         _ = run("tell application \"\(source.rawValue)\" to \(verb)")
+    }
+
+    /// Fast, direct read of Spotify's current track (used while skipping through the queue).
+    func currentSpotifyTrackURI() -> String? {
+        run("tell application \"Spotify\" to id of current track")?.stringValue
+    }
+
+    func seekToStart(_ source: MediaSource) {
+        _ = run("tell application \"\(source.rawValue)\" to set player position to 0")
     }
 
     func loadArtwork(for np: NowPlaying, completion: @escaping (NSImage?) -> Void) {
