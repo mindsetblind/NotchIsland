@@ -78,6 +78,12 @@ struct IslandView: View {
             ChargingPeekView(model: model)
                 .frame(width: model.size(for: .charging).width, height: model.notchSize.height)
                 .transition(.islandContent(scale: 0.8))
+        case .color:
+            if let hex = model.colorPeek {
+                ColorPeekView(model: model, hex: hex)
+                    .frame(width: model.size(for: .color).width, height: model.notchSize.height)
+                    .transition(.islandContent(scale: 0.8))
+            }
         case .device:
             if let event = model.devicePeek {
                 DevicePeekView(model: model, event: event)
@@ -205,6 +211,7 @@ struct ExpandedView: View {
                 case .music: MediaPanel(model: model).transition(.islandContent(scale: 0.97))
                 case .apps: AppsTab(model: model).transition(.islandContent(scale: 0.97))
                 case .shelf: ShelfTab(model: model).transition(.islandContent(scale: 0.97))
+                case .tools: ToolsTab(model: model).transition(.islandContent(scale: 0.97))
                 }
             }
             .frame(height: IslandModel.artworkSize)
@@ -610,6 +617,170 @@ struct ShelfItem: View {
             Button("Убрать с полки") { model.removeFromShelf(url) }
         }
         .help(url.path)
+    }
+}
+
+// MARK: - Tools
+
+struct ToolsTab: View {
+    @ObservedObject var model: IslandModel
+
+    var body: some View {
+        HStack(spacing: 14) {
+            ToolTile(symbol: "eyedropper.halffull", title: "Пипетка") { model.pickColor() }
+                .help("Выбрать цвет на экране и скопировать HEX")
+
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    Text("Последние цвета").font(.system(size: 12, weight: .medium)).foregroundStyle(.secondary)
+                    Spacer()
+                    if !model.colorHistory.isEmpty {
+                        IconButton(systemName: "trash", size: 10) { model.clearColors() }
+                            .foregroundStyle(.secondary)
+                            .help("Очистить историю цветов")
+                    }
+                }
+                if model.colorHistory.isEmpty {
+                    Text("Нажми «Пипетку» и кликни в любую точку экрана — HEX-код окажется в буфере обмена")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: 0)
+                } else {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 6) {
+                            ForEach(model.colorHistory, id: \.self) { hex in
+                                ColorSwatch(model: model, hex: hex)
+                                    .transition(.scale(0.5).combined(with: .opacity))
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Square tool button, same size as the player artwork so tabs line up.
+private struct ToolTile: View {
+    let symbol: String
+    let title: String
+    let action: () -> Void
+    @State private var hover = false
+
+    var body: some View {
+        Button(action: action) {
+            VStack(spacing: 8) {
+                Image(systemName: symbol).font(.system(size: 26, weight: .medium))
+                Text(title).font(.system(size: 11, weight: .medium))
+            }
+            .frame(width: IslandModel.artworkSize, height: IslandModel.artworkSize)
+            .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(.white.opacity(hover ? 0.14 : 0.08)))
+            .scaleEffect(hover ? 1.03 : 1)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { h in withAnimation(.spring(duration: 0.25, bounce: 0.4)) { hover = h } }
+    }
+}
+
+private struct ColorSwatch: View {
+    @ObservedObject var model: IslandModel
+    let hex: String
+    @State private var copied = false
+    @State private var hover = false
+
+    var body: some View {
+        VStack(spacing: 4) {
+            Circle()
+                .fill(Color(hex: hex))
+                .overlay(Circle().strokeBorder(.white.opacity(0.25), lineWidth: 1))
+                .overlay {
+                    if copied {
+                        Image(systemName: "checkmark").font(.system(size: 12, weight: .bold))
+                            .foregroundStyle(Color(hex: hex).isLight ? .black : .white)
+                    }
+                }
+                .frame(width: 34, height: 34)
+                .scaleEffect(hover ? 1.1 : 1)
+            Text(hex)
+                .font(.system(size: 9.5, weight: .medium, design: .monospaced))
+                .foregroundStyle(.secondary)
+        }
+        .frame(width: 58)
+        .contentShape(Rectangle())
+        .onHover { h in withAnimation(.spring(duration: 0.25, bounce: 0.4)) { hover = h } }
+        .onTapGesture { copy(hex) }
+        .contextMenu {
+            Button("Копировать HEX  \(hex)") { copy(hex) }
+            Button("Копировать rgb(…)") { copy(Color.cssRGB(hex)) }
+            Button("Копировать Color(red:…)") { copy(Color.swiftUI(hex)) }
+            Divider()
+            Button("Удалить") { model.removeColor(hex) }
+        }
+        .help("Клик — скопировать \(hex)")
+    }
+
+    private func copy(_ text: String) {
+        model.copyColor(text)
+        withAnimation(.easeOut(duration: 0.15)) { copied = true }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
+            withAnimation(.easeOut(duration: 0.2)) { copied = false }
+        }
+    }
+}
+
+struct ColorPeekView: View {
+    @ObservedObject var model: IslandModel
+    let hex: String
+
+    var body: some View {
+        EarsLayout(notchWidth: model.notchSize.width, height: model.notchSize.height) {
+            HStack(spacing: 7) {
+                Circle().fill(Color(hex: hex))
+                    .overlay(Circle().strokeBorder(.white.opacity(0.3), lineWidth: 1))
+                    .frame(width: 16, height: 16)
+                Text("Скопировано").font(.system(size: 12, weight: .medium))
+            }
+            .padding(.leading, 14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        } right: {
+            Text(hex)
+                .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                .padding(.trailing, 14)
+                .frame(maxWidth: .infinity, alignment: .trailing)
+        }
+    }
+}
+
+extension Color {
+    /// "#RRGGBB" → Color (sRGB).
+    init(hex: String) {
+        let v = Int(hex.dropFirst(), radix: 16) ?? 0
+        self.init(.sRGB, red: Double((v >> 16) & 0xFF) / 255, green: Double((v >> 8) & 0xFF) / 255,
+                  blue: Double(v & 0xFF) / 255)
+    }
+
+    private static func components(_ hex: String) -> (Int, Int, Int) {
+        let v = Int(hex.dropFirst(), radix: 16) ?? 0
+        return ((v >> 16) & 0xFF, (v >> 8) & 0xFF, v & 0xFF)
+    }
+
+    static func cssRGB(_ hex: String) -> String {
+        let (r, g, b) = components(hex)
+        return "rgb(\(r), \(g), \(b))"
+    }
+
+    static func swiftUI(_ hex: String) -> String {
+        let (r, g, b) = components(hex)
+        let f = { (x: Int) in String(format: "%.3f", Double(x) / 255) }
+        return "Color(red: \(f(r)), green: \(f(g)), blue: \(f(b)))"
+    }
+
+    /// Perceived brightness, to pick a readable checkmark color on top of the swatch.
+    var isLight: Bool {
+        guard let c = NSColor(self).usingColorSpace(.sRGB) else { return false }
+        return 0.299 * c.redComponent + 0.587 * c.greenComponent + 0.114 * c.blueComponent > 0.6
     }
 }
 

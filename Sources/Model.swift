@@ -7,18 +7,20 @@ enum IslandState: Equatable {
     case music       // small live activity: artwork + equalizer
     case charging    // short peek after plugging in power
     case device      // short peek when a Bluetooth device / drive connects or disconnects
+    case color       // short peek after picking a color: swatch + copied HEX
     case expanded    // hover
     case drop        // files are being dragged near the notch → AirDrop target
 }
 
 enum IslandTab: String, CaseIterable, Identifiable {
-    case music, apps, shelf
+    case music, apps, shelf, tools
     var id: String { rawValue }
     var symbol: String {
         switch self {
         case .music: return "music.note"
         case .apps: return "square.grid.2x2.fill"
         case .shelf: return "tray.fill"
+        case .tools: return "wrench.and.screwdriver.fill"
         }
     }
     var title: String {
@@ -26,6 +28,7 @@ enum IslandTab: String, CaseIterable, Identifiable {
         case .music: return "Музыка"
         case .apps: return "Приложения"
         case .shelf: return "Полка"
+        case .tools: return "Инструменты"
         }
     }
 }
@@ -37,6 +40,11 @@ final class IslandModel: ObservableObject {
     @Published private(set) var hoverHint = false
     @Published private(set) var chargingPeek = false
     @Published private(set) var devicePeek: DeviceEvent?
+    @Published private(set) var colorPeek: String?
+    /// Recently picked colors as "#RRGGBB", newest first (persisted).
+    @Published private(set) var colorHistory: [String] = UserDefaults.standard.stringArray(forKey: "colorHistory") ?? []
+    private var colorSampler: NSColorSampler?
+    private var colorPeekWork: DispatchWorkItem?
     /// Files parked on the shelf (persisted between launches).
     @Published private(set) var shelf: [URL] = []
     @Published private(set) var selectedTab: IslandTab =
@@ -97,6 +105,7 @@ final class IslandModel: ObservableObject {
         if fileDragActive && dropNear { return .drop }
         if hovering { return .expanded }
         if chargingPeek { return .charging }
+        if colorPeek != nil { return .color }
         if devicePeek != nil { return .device }
         if nowPlaying?.isPlaying == true { return .music }
         return .idle
@@ -127,6 +136,7 @@ final class IslandModel: ObservableObject {
         case .music:    return CGSize(width: notchSize.width + 2 * 40, height: notchSize.height)
         case .charging: return CGSize(width: notchSize.width + 2 * 70, height: notchSize.height)
         case .device:   return CGSize(width: notchSize.width + 2 * 125, height: notchSize.height)
+        case .color:    return CGSize(width: notchSize.width + 2 * 100, height: notchSize.height)
         case .drop:     return CGSize(width: max(540, notchSize.width + 350), height: notchSize.height + 112)
         case .expanded: return CGSize(width: max(480, notchSize.width + 290),
                                      height: notchSize.height + Self.contentTop + Self.artworkSize + Self.contentBottom
@@ -553,6 +563,58 @@ final class IslandModel: ObservableObject {
         }
         devicePeekWork = work
         DispatchQueue.main.asyncAfter(deadline: .now() + 3.5, execute: work)
+    }
+
+    // MARK: - Color picker
+
+    func pickColor() {
+        setHovering(false)   // get out of the way of the loupe
+        let sampler = NSColorSampler()
+        colorSampler = sampler
+        NSApp.activate(ignoringOtherApps: true)
+        sampler.show { [weak self] color in
+            guard let self else { return }
+            self.colorSampler = nil
+            guard let rgb = color?.usingColorSpace(.sRGB) else { return }   // nil → cancelled with Esc
+            let hex = String(format: "#%02X%02X%02X",
+                             Int((rgb.redComponent * 255).rounded()),
+                             Int((rgb.greenComponent * 255).rounded()),
+                             Int((rgb.blueComponent * 255).rounded()))
+            self.copyColor(hex)
+            withAnimation(Self.spring) {
+                self.colorHistory.removeAll { $0 == hex }
+                self.colorHistory.insert(hex, at: 0)
+                self.colorHistory = Array(self.colorHistory.prefix(12))
+            }
+            UserDefaults.standard.set(self.colorHistory, forKey: "colorHistory")
+            self.showColorPeek(hex)
+        }
+    }
+
+    func copyColor(_ text: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+    }
+
+    func removeColor(_ hex: String) {
+        withAnimation(Self.spring) { colorHistory.removeAll { $0 == hex } }
+        UserDefaults.standard.set(colorHistory, forKey: "colorHistory")
+    }
+
+    func clearColors() {
+        withAnimation(Self.spring) { colorHistory.removeAll() }
+        UserDefaults.standard.set(colorHistory, forKey: "colorHistory")
+    }
+
+    private func showColorPeek(_ hex: String) {
+        colorPeekWork?.cancel()
+        NSHapticFeedbackManager.defaultPerformer.perform(.levelChange, performanceTime: .now)
+        withAnimation(Self.spring) { colorPeek = hex }
+        let work = DispatchWorkItem { [weak self] in
+            withAnimation(Self.spring) { self?.colorPeek = nil }
+        }
+        colorPeekWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.5, execute: work)
     }
 
     // MARK: - Shuffle
