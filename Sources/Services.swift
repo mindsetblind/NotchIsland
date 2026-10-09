@@ -48,10 +48,30 @@ struct NowPlaying: Equatable {
     }
 }
 
+/// All AppleScript traffic goes through one serial background queue: a Spotify query takes ~100–200 ms,
+/// and doing that on the main thread froze animations once a second.
 final class MediaService {
     private var compiled: [String: NSAppleScript] = [:]
+    private let queue = DispatchQueue(label: "notchisland.applescript", qos: .userInitiated)
+    private let queueKey = DispatchSpecificKey<Bool>()
+
+    init() { queue.setSpecific(key: queueKey, value: true) }
+
+    /// Runs on the AppleScript queue (directly if already there).
+    private func onQueue<T>(_ work: () -> T) -> T {
+        DispatchQueue.getSpecific(key: queueKey) == true ? work() : queue.sync(execute: work)
+    }
+
+    /// Fire-and-forget command; ordering with later queries is preserved by the serial queue.
+    private func runAsync(_ source: String) {
+        queue.async { _ = self.run(source) }
+    }
 
     private func run(_ source: String) -> NSAppleEventDescriptor? {
+        onQueue { execute(source) }
+    }
+
+    private func execute(_ source: String) -> NSAppleEventDescriptor? {
         let script: NSAppleScript
         if let s = compiled[source] {
             script = s
@@ -81,6 +101,14 @@ final class MediaService {
         return {player state as string, name of t, artist of t, album of t, duration of t, player position, "", (database ID of t) as string, shuffle enabled}
     end tell
     """
+
+    /// Polls the players in the background and delivers the result on the main thread.
+    func fetchAsync(_ completion: @escaping (NowPlaying?) -> Void) {
+        queue.async {
+            let result = self.fetch()
+            DispatchQueue.main.async { completion(result) }
+        }
+    }
 
     func fetch() -> NowPlaying? {
         let candidates = [MediaSource.spotify, .music].filter(\.isRunning).compactMap { info(from: $0) }
@@ -116,7 +144,7 @@ final class MediaService {
         case .next: verb = "next track"
         case .previous: verb = "previous track"
         }
-        _ = run("tell application \"\(source.rawValue)\" to \(verb)")
+        runAsync("tell application \"\(source.rawValue)\" to \(verb)")
     }
 
     /// Fast, direct read of Spotify's current track (used while skipping through the queue).
@@ -127,8 +155,8 @@ final class MediaService {
 
     // MARK: Apple Music playlist
 
-    /// Tracks of the playlist Music is playing from. Runs its own script instance, so it's safe off the main thread.
-    static func musicContext(limit: Int = 1000) -> PlaybackContext? {
+    /// Tracks of the playlist Music is playing from (call off the main thread; runs on the AppleScript queue).
+    func musicContext(limit: Int = 1000) -> PlaybackContext? {
         let source = """
         tell application "Music"
             set p to current playlist
@@ -139,9 +167,7 @@ final class MediaService {
             return {name of p, name of tracks 1 thru b of p, artist of tracks 1 thru b of p, duration of tracks 1 thru b of p, database ID of tracks 1 thru b of p}
         end tell
         """
-        var error: NSDictionary?
-        guard let d = NSAppleScript(source: source)?.executeAndReturnError(&error), error == nil,
-              d.numberOfItems >= 5,
+        guard let d = run(source), d.numberOfItems >= 5,
               let names = d.atIndex(2), let artists = d.atIndex(3),
               let durations = d.atIndex(4), let ids = d.atIndex(5) else { return nil }
         let count = names.numberOfItems
@@ -159,16 +185,16 @@ final class MediaService {
     /// Plays a track *from the current playlist*, so playback continues through that playlist.
     func playMusicTrack(uri: String) {
         guard let id = Int(uri.replacingOccurrences(of: "music:", with: "")) else { return }
-        _ = run("tell application \"Music\" to play (first track of current playlist whose database ID is \(id))")
+        runAsync("tell application \"Music\" to play (first track of current playlist whose database ID is \(id))")
     }
 
     func setShuffle(_ on: Bool, for source: MediaSource) {
         let property = source == .spotify ? "shuffling" : "shuffle enabled"
-        _ = run("tell application \"\(source.rawValue)\" to set \(property) to \(on)")
+        runAsync("tell application \"\(source.rawValue)\" to set \(property) to \(on)")
     }
 
     func seekToStart(_ source: MediaSource) {
-        _ = run("tell application \"\(source.rawValue)\" to set player position to 0")
+        runAsync("tell application \"\(source.rawValue)\" to set player position to 0")
     }
 
     func loadArtwork(for np: NowPlaying, completion: @escaping (NSImage?) -> Void) {
@@ -180,12 +206,15 @@ final class MediaService {
                 DispatchQueue.main.async { completion(image) }
             }.resume()
         case .music:
-            let d = run("""
-            tell application "Music"
-                if (count of artworks of current track) > 0 then return raw data of artwork 1 of current track
-            end tell
-            """)
-            completion(d.flatMap { NSImage(data: $0.data) })
+            queue.async {
+                let d = self.run("""
+                tell application "Music"
+                    if (count of artworks of current track) > 0 then return raw data of artwork 1 of current track
+                end tell
+                """)
+                let image = d.flatMap { NSImage(data: $0.data) }
+                DispatchQueue.main.async { completion(image) }
+            }
         }
     }
 }

@@ -88,6 +88,7 @@ final class IslandModel: ObservableObject {
     private var artworkKey: String?
     private var playlistTask: Task<Void, Never>?
     private var skipTask: Task<Void, Never>?
+    private var mediaFetchInFlight = false
     private var lastListReloadKey: String?
     /// Track the queue-skipper is currently heading to (shown with a spinner in the list).
     @Published private(set) var skipTargetID: String?
@@ -121,7 +122,7 @@ final class IslandModel: ObservableObject {
     }
 
     var isExpanded: Bool { hovering }
-    private var isLarge: Bool { state == .expanded || state == .drop }
+    var isLarge: Bool { state == .expanded || state == .drop }
 
     var islandSize: CGSize {
         var s = size(for: state)
@@ -214,7 +215,18 @@ final class IslandModel: ObservableObject {
     // MARK: - Media
 
     func refreshMedia() {
-        let np = media.fetch()
+        guard !mediaFetchInFlight else { return }
+        mediaFetchInFlight = true
+        media.fetchAsync { [weak self] np in
+            self?.mediaFetchInFlight = false
+            self?.apply(np)
+        }
+    }
+
+    /// Snapshot mode needs the result right away.
+    func refreshMediaNow() { apply(media.fetch()) }
+
+    private func apply(_ np: NowPlaying?) {
         if np != nowPlaying {
             withAnimation(Self.spring) { nowPlaying = np }
         }
@@ -293,7 +305,7 @@ final class IslandModel: ObservableObject {
         playlistLoading = true
         playlistError = nil
         DispatchQueue.global(qos: .userInitiated).async {
-            let ctx = MediaService.musicContext()
+            let ctx = self.media.musicContext()
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
                 self.playlistLoading = false

@@ -34,6 +34,7 @@ struct NotchShape: Shape {
 
 struct IslandView: View {
     @ObservedObject var model: IslandModel
+    @State private var shadowOn = false
 
     var body: some View {
         let size = model.islandSize
@@ -47,7 +48,21 @@ struct IslandView: View {
         }
         .frame(width: size.width + tr * 2, height: size.height, alignment: .top)
         .clipShape(NotchShape(topRadius: tr, bottomRadius: model.bottomRadius))
-        .shadow(color: .black.opacity(model.isExpanded ? 0.5 : 0), radius: 16, y: 6)
+        // A blurred shadow re-rendered on every frame of a resize is expensive, so it only
+        // fades in once the island has finished opening, and drops instantly when it closes.
+        .shadow(color: .black.opacity(shadowOn ? 0.5 : 0), radius: shadowOn ? 16 : 0, y: shadowOn ? 6 : 0)
+        .onChange(of: model.isLarge) { _, large in
+            if large {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) {
+                    guard model.isLarge else { return }
+                    withAnimation(.easeOut(duration: 0.2)) { shadowOn = true }
+                }
+            } else {
+                var t = Transaction()
+                t.disablesAnimations = true
+                withTransaction(t) { shadowOn = false }
+            }
+        }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .foregroundStyle(.white)
         .environment(\.colorScheme, .dark)
@@ -125,7 +140,7 @@ struct IslandContentEffect: ViewModifier {
     func body(content: Content) -> some View {
         content
             .opacity(progress)
-            .blur(radius: (1 - progress) * 8)
+            .blur(radius: (1 - progress) * 5)
             .scaleEffect(scale + (1 - scale) * progress, anchor: .top)
     }
 }
@@ -600,7 +615,7 @@ struct ShelfItem: View {
 
     var body: some View {
         VStack(spacing: 3) {
-            Image(nsImage: NSWorkspace.shared.icon(forFile: url.path))
+            Image(nsImage: model.icon(for: url))
                 .resizable()
                 .frame(width: 38, height: 38)
                 .overlay(alignment: .topTrailing) {

@@ -22,7 +22,7 @@ enum Snapshots {
     private static func render(to dir: URL) {
         let model = IslandModel()
         model.notchSize = CGSize(width: 185, height: 32)
-        model.refreshMedia()
+        model.refreshMediaNow()
         let notch = model.notchSize
         let project = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
         model.fillForSnapshots(
