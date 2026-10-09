@@ -242,9 +242,13 @@ final class IslandModel: ObservableObject {
     }
 
     func loadPlaylist(onlyIfStale: Bool = false) {
-        guard spotifyHasClientID, spotifyLoggedIn else { return }
         if onlyIfStale, let list = playlist, let np = nowPlaying,
            Self.index(of: np.trackURI, name: np.title, in: list.tracks) != nil { return }
+        if nowPlaying?.source == .music {
+            loadMusicPlaylist()
+            return
+        }
+        guard spotifyHasClientID, spotifyLoggedIn else { return }
         playlistTask?.cancel()
         playlistLoading = true
         playlistError = nil
@@ -262,8 +266,32 @@ final class IslandModel: ObservableObject {
         }
     }
 
+    /// Apple Music: AppleScript exposes the current playlist directly — no login, no API limits.
+    private func loadMusicPlaylist() {
+        playlistTask?.cancel()
+        playlistLoading = true
+        playlistError = nil
+        DispatchQueue.global(qos: .userInitiated).async {
+            let ctx = MediaService.musicContext()
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                self.playlistLoading = false
+                if let ctx {
+                    withAnimation(.easeInOut(duration: 0.2)) { self.playlist = ctx }
+                } else {
+                    self.playlistError = "«Музыка» не отдала текущий плейлист — так бывает с радио и подборками, не добавленными в медиатеку"
+                }
+            }
+        }
+    }
+
     func play(_ track: PlaylistTrack) {
         guard let list = playlist else { return }
+        if track.uri.hasPrefix("music:") {
+            media.playMusicTrack(uri: track.uri)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in self?.refreshMedia() }
+            return
+        }
         if list.uri == nil {
             skipInQueue(to: track, in: list)
             return

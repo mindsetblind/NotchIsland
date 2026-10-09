@@ -317,11 +317,9 @@ struct MediaPanel: View {
                             .help(np.isShuffling ? "Перемешивание включено" : "Перемешивание выключено")
                     }
                     .overlay(alignment: .trailing) {
-                        if np.source == .spotify {
-                            IconButton(systemName: "list.bullet", size: 13) { model.togglePlaylist() }
-                                .foregroundStyle(model.showPlaylist ? Color.white : Color.white.opacity(0.55))
-                                .help("Плейлист")
-                        }
+                        IconButton(systemName: "list.bullet", size: 13) { model.togglePlaylist() }
+                            .foregroundStyle(model.showPlaylist ? Color.white : Color.white.opacity(0.55))
+                            .help("Плейлист")
                     }
                     .padding(.bottom, -5) // optical: icon buttons carry 5pt of hit padding below the glyph
                 }
@@ -676,7 +674,7 @@ struct PlaylistPanel: View {
                 Spacer()
                 if model.playlistLoading {
                     ProgressView().controlSize(.mini)
-                } else if model.spotifyLoggedIn {
+                } else if model.spotifyLoggedIn || !isSpotify {
                     IconButton(systemName: "arrow.clockwise", size: 10) { model.loadPlaylist() }
                         .foregroundStyle(.secondary)
                 }
@@ -689,12 +687,15 @@ struct PlaylistPanel: View {
         .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(.white.opacity(0.06)))
     }
 
+    /// Spotify needs a Client ID and login; Apple Music works straight through AppleScript.
+    private var isSpotify: Bool { model.nowPlaying?.source != .music }
+
     @ViewBuilder private var content: some View {
-        if !model.spotifyHasClientID {
+        if isSpotify && !model.spotifyHasClientID {
             Placeholder(text: "Укажи Spotify Client ID: правый клик по острову → «Spotify Client ID…»") {
                 PillButton(title: "Указать") { SpotifySettings.askClientID(model: model) }
             }
-        } else if !model.spotifyLoggedIn {
+        } else if isSpotify && !model.spotifyLoggedIn {
             Placeholder(text: "Войди в Spotify, чтобы видеть треки плейлиста") {
                 PillButton(title: "Войти в Spotify") { model.spotifyLogin() }
             }

@@ -78,7 +78,7 @@ final class MediaService {
     tell application "Music"
         if player state is stopped then return {"stopped"}
         set t to current track
-        return {player state as string, name of t, artist of t, album of t, duration of t, player position, "", "", shuffle enabled}
+        return {player state as string, name of t, artist of t, album of t, duration of t, player position, "", (database ID of t) as string, shuffle enabled}
     end tell
     """
 
@@ -100,7 +100,10 @@ final class MediaService {
             position: d.atIndex(6)?.doubleValue ?? 0,
             isPlaying: state == "playing",
             artworkURL: d.atIndex(7)?.stringValue.flatMap { $0.isEmpty ? nil : $0 },
-            trackURI: d.numberOfItems >= 8 ? d.atIndex(8)?.stringValue.flatMap { $0.isEmpty ? nil : $0 } : nil,
+            // Spotify gives "spotify:track:…"; for Music we build "music:<database ID>" so both match playlist rows.
+            trackURI: d.numberOfItems >= 8
+                ? d.atIndex(8)?.stringValue.flatMap { $0.isEmpty ? nil : (source == .music ? "music:" + $0 : $0) }
+                : nil,
             isShuffling: d.numberOfItems >= 9 ? d.atIndex(9)?.booleanValue ?? false : false,
             fetchedAt: Date()
         )
@@ -120,6 +123,43 @@ final class MediaService {
     func currentSpotifyTrack() -> (uri: String?, name: String?) {
         let d = run("tell application \"Spotify\" to {id of current track, name of current track}")
         return (d?.atIndex(1)?.stringValue, d?.atIndex(2)?.stringValue)
+    }
+
+    // MARK: Apple Music playlist
+
+    /// Tracks of the playlist Music is playing from. Runs its own script instance, so it's safe off the main thread.
+    static func musicContext(limit: Int = 1000) -> PlaybackContext? {
+        let source = """
+        tell application "Music"
+            set p to current playlist
+            set total to count of tracks of p
+            if total = 0 then return {name of p, {}, {}, {}, {}}
+            set b to total
+            if b > \(limit) then set b to \(limit)
+            return {name of p, name of tracks 1 thru b of p, artist of tracks 1 thru b of p, duration of tracks 1 thru b of p, database ID of tracks 1 thru b of p}
+        end tell
+        """
+        var error: NSDictionary?
+        guard let d = NSAppleScript(source: source)?.executeAndReturnError(&error), error == nil,
+              d.numberOfItems >= 5,
+              let names = d.atIndex(2), let artists = d.atIndex(3),
+              let durations = d.atIndex(4), let ids = d.atIndex(5) else { return nil }
+        let count = names.numberOfItems
+        let tracks: [PlaylistTrack] = count == 0 ? [] : (1...count).compactMap { i in
+            guard let id = ids.atIndex(i)?.int32Value else { return nil }
+            return PlaylistTrack(id: "\(i)-music:\(id)", uri: "music:\(id)", linkedURI: nil,
+                                 name: names.atIndex(i)?.stringValue ?? "",
+                                 artist: artists.atIndex(i)?.stringValue ?? "",
+                                 duration: durations.atIndex(i)?.doubleValue ?? 0,
+                                 imageURL: nil)
+        }
+        return PlaybackContext(uri: "music:current-playlist", title: d.atIndex(1)?.stringValue ?? "Плейлист", tracks: tracks)
+    }
+
+    /// Plays a track *from the current playlist*, so playback continues through that playlist.
+    func playMusicTrack(uri: String) {
+        guard let id = Int(uri.replacingOccurrences(of: "music:", with: "")) else { return }
+        _ = run("tell application \"Music\" to play (first track of current playlist whose database ID is \(id))")
     }
 
     func setShuffle(_ on: Bool, for source: MediaSource) {
