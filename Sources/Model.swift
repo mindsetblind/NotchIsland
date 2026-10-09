@@ -527,6 +527,21 @@ final class IslandModel: ObservableObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + 3.5, execute: work)
     }
 
+    // MARK: - Shuffle
+
+    func toggleShuffle() {
+        guard var np = nowPlaying else { return }
+        np.isShuffling.toggle()
+        media.setShuffle(np.isShuffling, for: np.source)
+        withAnimation(.easeOut(duration: 0.15)) { nowPlaying = np }   // instant feedback
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in
+            guard let self else { return }
+            self.refreshMedia()
+            // Shuffling reorders what plays next, so a shown queue is now stale.
+            if self.showPlaylist, self.playlist?.uri == nil { self.loadPlaylist() }
+        }
+    }
+
     // MARK: - Battery
 
     private func refreshBattery() {

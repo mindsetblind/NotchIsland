@@ -306,6 +306,16 @@ struct MediaPanel: View {
                         IconButton(systemName: "forward.fill", size: 16) { model.perform(.next) }
                     }
                     .frame(maxWidth: .infinity)
+                    .overlay(alignment: .leading) {
+                        IconButton(systemName: "shuffle", size: 13) { model.toggleShuffle() }
+                            .foregroundStyle(np.isShuffling ? Color.white : Color.white.opacity(0.4))
+                            .overlay(alignment: .bottom) {
+                                if np.isShuffling {
+                                    Circle().fill(.white).frame(width: 3, height: 3).offset(y: 1)
+                                }
+                            }
+                            .help(np.isShuffling ? "Перемешивание включено" : "Перемешивание выключено")
+                    }
                     .overlay(alignment: .trailing) {
                         if np.source == .spotify {
                             IconButton(systemName: "list.bullet", size: 13) { model.togglePlaylist() }

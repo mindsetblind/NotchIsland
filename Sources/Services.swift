@@ -31,6 +31,7 @@ struct NowPlaying: Equatable {
     var isPlaying: Bool
     var artworkURL: String?
     var trackURI: String?      // "spotify:track:…" (Spotify only)
+    var isShuffling = false
     var fetchedAt: Date
 
     var trackKey: String { "\(source.rawValue)|\(title)|\(artist)|\(album)" }
@@ -43,7 +44,7 @@ struct NowPlaying: Equatable {
 
     static func == (a: NowPlaying, b: NowPlaying) -> Bool {
         // Ignore small drift in position so we don't re-render every poll.
-        a.trackKey == b.trackKey && a.isPlaying == b.isPlaying && abs(a.position(at: Date()) - b.position(at: Date())) < 1.5
+        a.trackKey == b.trackKey && a.isPlaying == b.isPlaying && a.isShuffling == b.isShuffling && abs(a.position(at: Date()) - b.position(at: Date())) < 1.5
     }
 }
 
@@ -69,7 +70,7 @@ final class MediaService {
     tell application "Spotify"
         if player state is stopped then return {"stopped"}
         set t to current track
-        return {player state as string, name of t, artist of t, album of t, (duration of t) / 1000, player position, artwork url of t, id of t}
+        return {player state as string, name of t, artist of t, album of t, (duration of t) / 1000, player position, artwork url of t, id of t, shuffling}
     end tell
     """
 
@@ -77,7 +78,7 @@ final class MediaService {
     tell application "Music"
         if player state is stopped then return {"stopped"}
         set t to current track
-        return {player state as string, name of t, artist of t, album of t, duration of t, player position, "", ""}
+        return {player state as string, name of t, artist of t, album of t, duration of t, player position, "", "", shuffle enabled}
     end tell
     """
 
@@ -100,6 +101,7 @@ final class MediaService {
             isPlaying: state == "playing",
             artworkURL: d.atIndex(7)?.stringValue.flatMap { $0.isEmpty ? nil : $0 },
             trackURI: d.numberOfItems >= 8 ? d.atIndex(8)?.stringValue.flatMap { $0.isEmpty ? nil : $0 } : nil,
+            isShuffling: d.numberOfItems >= 9 ? d.atIndex(9)?.booleanValue ?? false : false,
             fetchedAt: Date()
         )
     }
@@ -118,6 +120,11 @@ final class MediaService {
     func currentSpotifyTrack() -> (uri: String?, name: String?) {
         let d = run("tell application \"Spotify\" to {id of current track, name of current track}")
         return (d?.atIndex(1)?.stringValue, d?.atIndex(2)?.stringValue)
+    }
+
+    func setShuffle(_ on: Bool, for source: MediaSource) {
+        let property = source == .spotify ? "shuffling" : "shuffle enabled"
+        _ = run("tell application \"\(source.rawValue)\" to set \(property) to \(on)")
     }
 
     func seekToStart(_ source: MediaSource) {
