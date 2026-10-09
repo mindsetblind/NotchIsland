@@ -30,6 +30,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// One-shot re-check while a hover delay is pending (expand after 0.15 s, collapse after 0.25 s).
     private var recheckTimer: Timer?
     private var enteredAt: Date?
+    /// Drag pasteboard generation at the last mouse-down: a change during dragging means a real drag session.
+    private var dragChangeCount = 0
+    private var dragWatch: Timer?
     private var leftAt: Date?
 
     private let canvasSize = CGSize(width: 760, height: 460)
@@ -47,8 +50,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                                object: nil)
 
         // React to real mouse movement instead of polling: zero work while the mouse is still.
-        NSEvent.addGlobalMonitorForEvents(matching: [.mouseMoved, .leftMouseDragged]) { [weak self] _ in
+        NSEvent.addGlobalMonitorForEvents(matching: [.mouseMoved, .leftMouseDragged]) { [weak self] event in
+            if event.type == .leftMouseDragged { self?.detectFileDrag() }
             self?.trackMouse()
+        }
+        NSEvent.addGlobalMonitorForEvents(matching: .leftMouseDown) { [weak self] _ in
+            self?.dragChangeCount = NSPasteboard(name: .drag).changeCount
         }
         NSEvent.addLocalMonitorForEvents(matching: [.mouseMoved, .leftMouseDragged, .mouseExited]) { [weak self] event in
             self?.trackMouse()
@@ -80,9 +87,39 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return CGSize(width: 190, height: menuBar)
     }
 
+    // MARK: File drag → AirDrop
+
+    /// Another app (Finder, Desktop…) started dragging files: let the island act as a drop target.
+    private func detectFileDrag() {
+        guard !model.fileDragActive else { return }
+        let pb = NSPasteboard(name: .drag)
+        guard pb.changeCount != dragChangeCount,
+              pb.canReadObject(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) else { return }
+        model.setFileDrag(true)
+        // Drag sessions swallow mouse-up in some cases, so watch the button state until it's released.
+        dragWatch?.invalidate()
+        dragWatch = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] timer in
+            guard NSEvent.pressedMouseButtons & 1 == 0 else { return }
+            timer.invalidate()
+            // Leave a moment for the drop itself to be delivered before tearing the drop zone down.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                self?.model.setFileDrag(false)
+                self?.trackMouse()
+            }
+        }
+    }
+
     private func trackMouse() {
         guard let screen = targetScreen else { return }
         let mouse = NSEvent.mouseLocation
+
+        if model.fileDragActive {
+            // Generous zone around the notch so the drop target opens before you hit it exactly.
+            let near = mouse.y > screen.frame.maxY - 170 && abs(mouse.x - screen.frame.midX) < 320
+            model.setDropNear(near)
+            panel.ignoresMouseEvents = !near
+            return
+        }
         let size = model.islandSize
         let pad: CGFloat = model.isExpanded ? 4 : 8
         let rect = CGRect(x: screen.frame.midX - size.width / 2 - pad,

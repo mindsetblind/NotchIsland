@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import UniformTypeIdentifiers
 
 // MARK: - Shape
 
@@ -77,6 +78,11 @@ struct IslandView: View {
             ChargingPeekView(model: model)
                 .frame(width: model.size(for: .charging).width, height: model.notchSize.height)
                 .transition(.islandContent(scale: 0.8))
+        case .drop:
+            let s = model.size(for: .drop)
+            DropZoneView(model: model)
+                .frame(width: s.width, height: s.height, alignment: .top)
+                .transition(.islandContent(scale: 0.9))
         case .expanded:
             let s = model.size(for: .expanded)
             ExpandedView(model: model)
@@ -290,6 +296,61 @@ struct ProgressRow: View {
     private func format(_ t: Double) -> String {
         let s = Int(t.isFinite ? t : 0)
         return String(format: "%d:%02d", s / 60, s % 60)
+    }
+}
+
+// MARK: - AirDrop drop zone
+
+struct DropZoneView: View {
+    @ObservedObject var model: IslandModel
+    @State private var targeted = false
+
+    private static let airDropIcon: NSImage? = {
+        let path = "/System/Library/CoreServices/Finder.app/Contents/Applications/AirDrop.app"
+        return FileManager.default.fileExists(atPath: path) ? NSWorkspace.shared.icon(forFile: path) : nil
+    }()
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Color.clear.frame(height: model.notchSize.height)
+
+            ZStack {
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .fill(.white.opacity(targeted ? 0.12 : 0.04))
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .strokeBorder(.white.opacity(targeted ? 0.85 : 0.28),
+                                  style: StrokeStyle(lineWidth: 1.5, dash: [6, 5]))
+                HStack(spacing: 14) {
+                    Group {
+                        if let icon = Self.airDropIcon {
+                            Image(nsImage: icon).resizable()
+                        } else {
+                            Image(systemName: "dot.radiowaves.left.and.right").resizable().scaledToFit().padding(6)
+                        }
+                    }
+                    .frame(width: 46, height: 46)
+                    .scaleEffect(targeted ? 1.12 : 1)
+
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("AirDrop").font(.system(size: 15, weight: .semibold))
+                        Text(targeted ? "Отпусти, чтобы отправить" : "Перетащи файлы сюда")
+                            .font(.system(size: 12))
+                            .foregroundStyle(.secondary)
+                            .contentTransition(.opacity)
+                    }
+                }
+            }
+            .padding(.horizontal, IslandModel.inset)
+            .padding(.top, 8)
+            .padding(.bottom, 20)
+        }
+        .onDrop(of: [.fileURL], isTargeted: $targeted.animation(.spring(duration: 0.3, bounce: 0.35))) { providers in
+            model.airDrop(providers)
+            return true
+        }
+        .onChange(of: targeted) { _, on in
+            if on { NSHapticFeedbackManager.defaultPerformer.perform(.levelChange, performanceTime: .now) }
+        }
     }
 }
 

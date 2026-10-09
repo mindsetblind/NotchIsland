@@ -6,6 +6,7 @@ enum IslandState: Equatable {
     case music       // small live activity: artwork + equalizer
     case charging    // short peek after plugging in power
     case expanded    // hover
+    case drop        // files are being dragged near the notch → AirDrop target
 }
 
 final class IslandModel: ObservableObject {
@@ -14,6 +15,8 @@ final class IslandModel: ObservableObject {
     /// Pointer is over the notch but hasn't expanded it yet: the island "swells" a little.
     @Published private(set) var hoverHint = false
     @Published private(set) var chargingPeek = false
+    @Published private(set) var fileDragActive = false
+    @Published private(set) var dropNear = false
     @Published private(set) var nowPlaying: NowPlaying?
     @Published private(set) var artwork: NSImage?
     @Published private(set) var battery = Battery.read()
@@ -51,6 +54,7 @@ final class IslandModel: ObservableObject {
     static let hint = Animation.spring(duration: 0.3, bounce: 0.35)
 
     var state: IslandState {
+        if fileDragActive && dropNear { return .drop }
         if hovering { return .expanded }
         if chargingPeek { return .charging }
         if nowPlaying?.isPlaying == true { return .music }
@@ -58,6 +62,7 @@ final class IslandModel: ObservableObject {
     }
 
     var isExpanded: Bool { hovering }
+    private var isLarge: Bool { state == .expanded || state == .drop }
 
     var islandSize: CGSize {
         var s = size(for: state)
@@ -80,14 +85,15 @@ final class IslandModel: ObservableObject {
         case .idle:     return notchSize
         case .music:    return CGSize(width: notchSize.width + 2 * 40, height: notchSize.height)
         case .charging: return CGSize(width: notchSize.width + 2 * 70, height: notchSize.height)
+        case .drop:     return CGSize(width: max(440, notchSize.width + 250), height: notchSize.height + 112)
         case .expanded: return CGSize(width: max(480, notchSize.width + 290),
                                      height: notchSize.height + Self.contentTop + Self.artworkSize + Self.contentBottom
                                         + (showPlaylist ? Self.playlistHeight + Self.contentBottom : 0))
         }
     }
 
-    var topRadius: CGFloat { state == .expanded ? 14 : 6 }
-    var bottomRadius: CGFloat { state == .expanded ? 30 : 12 }
+    var topRadius: CGFloat { isLarge ? 14 : 6 }
+    var bottomRadius: CGFloat { isLarge ? 30 : 12 }
 
     func start() {
         refreshMedia()
@@ -254,6 +260,47 @@ final class IslandModel: ObservableObject {
     func setSpotifyClientID(_ id: String?) {
         spotify.clientID = id
         spotifyHasClientID = spotify.clientID != nil
+    }
+
+    // MARK: - Drag & drop → AirDrop
+
+    func setFileDrag(_ active: Bool) {
+        guard active != fileDragActive else { return }
+        withAnimation(active ? Self.open : Self.close) {
+            fileDragActive = active
+            if !active { dropNear = false }
+        }
+    }
+
+    func setDropNear(_ near: Bool) {
+        guard near != dropNear else { return }
+        if near { NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now) }
+        withAnimation(near ? Self.open : Self.close) {
+            dropNear = near
+            if near { hovering = false; hoverHint = false }
+        }
+    }
+
+    /// Collects the dropped file URLs and hands them to the system AirDrop sheet.
+    func airDrop(_ providers: [NSItemProvider]) {
+        var urls: [URL] = []
+        let group = DispatchGroup()
+        for provider in providers {
+            group.enter()
+            _ = provider.loadObject(ofClass: URL.self) { url, _ in
+                DispatchQueue.main.async {
+                    if let url, url.isFileURL { urls.append(url) }
+                    group.leave()
+                }
+            }
+        }
+        group.notify(queue: .main) { [weak self] in
+            self?.setFileDrag(false)
+            guard !urls.isEmpty, let service = NSSharingService(named: .sendViaAirDrop),
+                  service.canPerform(withItems: urls) else { return }
+            NSApp.activate(ignoringOtherApps: true)
+            service.perform(withItems: urls)
+        }
     }
 
     // MARK: - Battery
