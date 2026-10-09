@@ -76,6 +76,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         model.onDragOutEnded = { [weak self] in self?.trackMouse() }
         model.start()
+        LoginItem.applyOnLaunch()
     }
 
     private var targetScreen: NSScreen? {
@@ -178,6 +179,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             : nil
     }
 }
+
+MainActor.assumeIsolated { Snapshots.runIfRequested() }
 
 let app = NSApplication.shared
 let delegate = AppDelegate()

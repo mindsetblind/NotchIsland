@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import UniformTypeIdentifiers
 import SwiftUI
 
@@ -8,6 +9,8 @@ enum IslandState: Equatable {
     case charging    // short peek after plugging in power
     case device      // short peek when a Bluetooth device / drive connects or disconnects
     case color       // short peek after picking a color: swatch + copied HEX
+    case pomodoro    // timer running: ring + time around the notch
+    case pomodoroPeek // phase finished
     case expanded    // hover
     case drop        // files are being dragged near the notch → AirDrop target
 }
@@ -78,6 +81,8 @@ final class IslandModel: ObservableObject {
     let spotify = SpotifyWeb()
 
     let media = MediaService()
+    let pomodoro = Pomodoro()
+    private var pomodoroObserver: Any?
     private var timers: [Timer] = []
     private var peekWork: DispatchWorkItem?
     private var artworkKey: String?
@@ -91,6 +96,8 @@ final class IslandModel: ObservableObject {
         // An older login without playback-control permission must be redone once.
         spotifyLoggedIn = spotify.isLoggedIn && !spotify.needsReauth
         spotifyHasClientID = spotify.clientID != nil
+        // Island state depends on the timer, so re-render whenever it changes.
+        pomodoroObserver = pomodoro.objectWillChange.sink { [weak self] in self?.objectWillChange.send() }
     }
 
     /// General state changes (music started, charging peek).
@@ -105,8 +112,10 @@ final class IslandModel: ObservableObject {
         if fileDragActive && dropNear { return .drop }
         if hovering { return .expanded }
         if chargingPeek { return .charging }
+        if pomodoro.peek != nil { return .pomodoroPeek }
         if colorPeek != nil { return .color }
         if devicePeek != nil { return .device }
+        if pomodoro.isRunning { return .pomodoro }
         if nowPlaying?.isPlaying == true { return .music }
         return .idle
     }
@@ -134,9 +143,11 @@ final class IslandModel: ObservableObject {
         switch state {
         case .idle:     return notchSize
         case .music:    return CGSize(width: notchSize.width + 2 * 40, height: notchSize.height)
-        case .charging: return CGSize(width: notchSize.width + 2 * 70, height: notchSize.height)
-        case .device:   return CGSize(width: notchSize.width + 2 * 125, height: notchSize.height)
-        case .color:    return CGSize(width: notchSize.width + 2 * 100, height: notchSize.height)
+        case .charging: return CGSize(width: notchSize.width + 2 * 92, height: notchSize.height)
+        case .device:   return CGSize(width: notchSize.width + 2 * 150, height: notchSize.height)
+        case .color:    return CGSize(width: notchSize.width + 2 * 140, height: notchSize.height)
+        case .pomodoro: return CGSize(width: notchSize.width + 2 * 58, height: notchSize.height)
+        case .pomodoroPeek: return CGSize(width: notchSize.width + 2 * 160, height: notchSize.height)
         case .drop:     return CGSize(width: max(540, notchSize.width + 350), height: notchSize.height + 112)
         case .expanded: return CGSize(width: max(480, notchSize.width + 290),
                                      height: notchSize.height + Self.contentTop + Self.artworkSize + Self.contentBottom
@@ -454,6 +465,13 @@ final class IslandModel: ObservableObject {
     func clearShelf() {
         withAnimation(Self.spring) { shelf.removeAll() }
         saveShelf()
+    }
+
+    /// Snapshot mode only: fill lists with sample data without touching what's saved.
+    func fillForSnapshots(shelf: [URL], apps: [URL], colors: [String]) {
+        self.shelf = shelf
+        self.apps = apps
+        self.colorHistory = colors
     }
 
     private func loadShelf() {

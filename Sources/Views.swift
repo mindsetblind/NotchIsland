@@ -78,6 +78,16 @@ struct IslandView: View {
             ChargingPeekView(model: model)
                 .frame(width: model.size(for: .charging).width, height: model.notchSize.height)
                 .transition(.islandContent(scale: 0.8))
+        case .pomodoro:
+            PomodoroCompactView(model: model, pomodoro: model.pomodoro)
+                .frame(width: model.size(for: .pomodoro).width, height: model.notchSize.height)
+                .transition(.islandContent(scale: 0.8))
+        case .pomodoroPeek:
+            if let peek = model.pomodoro.peek {
+                PomodoroPeekView(model: model, peek: peek)
+                    .frame(width: model.size(for: .pomodoroPeek).width, height: model.notchSize.height)
+                    .transition(.islandContent(scale: 0.8))
+            }
         case .color:
             if let hex = model.colorPeek {
                 ColorPeekView(model: model, hex: hex)
@@ -137,6 +147,7 @@ extension AnyTransition {
 
 /// Content laid out on the two "ears" left and right of the physical notch.
 struct EarsLayout<Left: View, Right: View>: View {
+    static var notchGap: CGFloat { 8 }
     let notchWidth: CGFloat
     let height: CGFloat
     @ViewBuilder var left: Left
@@ -144,9 +155,10 @@ struct EarsLayout<Left: View, Right: View>: View {
 
     var body: some View {
         HStack(spacing: 0) {
-            left.frame(maxWidth: .infinity)
+            // Keep a gap to the physical notch so nothing looks glued to (or hidden behind) its edge.
+            left.frame(maxWidth: .infinity).padding(.trailing, Self.notchGap)
             Spacer().frame(width: notchWidth)
-            right.frame(maxWidth: .infinity)
+            right.frame(maxWidth: .infinity).padding(.leading, Self.notchGap)
         }
         .frame(height: height)
     }
@@ -242,7 +254,7 @@ struct TabBar: View {
                     Image(systemName: tab.symbol)
                         .font(.system(size: 11, weight: .semibold))
                         .foregroundStyle(.white.opacity(selected ? 1 : 0.45))
-                        .frame(width: 30, height: 22)
+                        .frame(width: 28, height: 22)
                         .background {
                             if selected {
                                 Capsule().fill(.white.opacity(0.15))
@@ -251,7 +263,7 @@ struct TabBar: View {
                         }
                         .overlay(alignment: .topTrailing) {
                             if tab == .shelf && !model.shelf.isEmpty {
-                                Circle().fill(.white).frame(width: 5, height: 5).offset(x: -5, y: 3)
+                                Circle().fill(.white).frame(width: 5, height: 5).offset(x: -4, y: 3)
                             }
                         }
                         .contentShape(Rectangle())
@@ -465,19 +477,22 @@ struct AppsTab: View {
             EmptyTab(symbol: "square.grid.2x2", text: "Добавь приложения, в которых часто работаешь",
                      buttonTitle: "Добавить") { model.addApps() }
         } else {
-            ScrollView(.horizontal, showsIndicators: false) {
+            HScroll {
                 HStack(spacing: 4) {
                     ForEach(model.apps, id: \.self) { url in
                         AppIcon(model: model, url: url)
                             .transition(.scale(0.5).combined(with: .opacity))
                     }
                     Button { model.addApps() } label: {
-                        VStack(spacing: 5) {
-                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        // Same structure as AppIcon (46pt icon, label, 4pt dot slot) so the labels line up.
+                        VStack(spacing: 4) {
+                            RoundedRectangle(cornerRadius: 11, style: .continuous)
                                 .strokeBorder(.white.opacity(0.25), style: StrokeStyle(lineWidth: 1.2, dash: [4, 4]))
-                                .frame(width: 44, height: 44)
+                                .frame(width: 40, height: 40)
                                 .overlay(Image(systemName: "plus").font(.system(size: 15, weight: .semibold)).foregroundStyle(.secondary))
-                            Text("Добавить").font(.system(size: 10)).foregroundStyle(.secondary)
+                                .frame(width: 46, height: 46)
+                            Text("Добавить").font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1)
+                            Color.clear.frame(width: 4, height: 4)
                         }
                         .frame(width: 66)
                     }
@@ -551,13 +566,14 @@ struct ShelfTab: View {
                         .foregroundStyle(.secondary)
                         .help("Очистить полку")
                 }
-                ScrollView(.horizontal, showsIndicators: false) {
+                HScroll {
                     HStack(spacing: 6) {
                         ForEach(model.shelf, id: \.self) { url in
                             ShelfItem(model: model, url: url)
                                 .transition(.scale(0.6).combined(with: .opacity))
                         }
                     }
+                    .padding(.horizontal, 2)
                 }
             }
         }
@@ -574,34 +590,44 @@ struct ShelfTab: View {
 struct ShelfItem: View {
     @ObservedObject var model: IslandModel
     let url: URL
-    @State private var hover = false
+    @State private var hover: Bool
+
+    init(model: IslandModel, url: URL, hover: Bool = false) {
+        self.model = model
+        self.url = url
+        _hover = State(initialValue: hover)
+    }
 
     var body: some View {
         VStack(spacing: 3) {
             Image(nsImage: NSWorkspace.shared.icon(forFile: url.path))
                 .resizable()
                 .frame(width: 38, height: 38)
+                .overlay(alignment: .topTrailing) {
+                    if hover {
+                        Button { model.removeFromShelf(url) } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.system(size: 14))
+                                .symbolRenderingMode(.palette)
+                                .foregroundStyle(.white, Color(white: 0.35))
+                                .background(Circle().fill(.black).padding(1))
+                        }
+                        .buttonStyle(.plain)
+                        .offset(x: 7, y: -5)
+                        .transition(.scale(0.5).combined(with: .opacity))
+                        .help("Убрать с полки")
+                    }
+                }
             Text(url.lastPathComponent)
                 .font(.system(size: 10))
                 .lineLimit(1)
                 .truncationMode(.middle)
                 .frame(width: 64)
         }
-        .padding(.vertical, 4)
+        .padding(.top, 7)          // room for the close button above the icon
+        .padding(.bottom, 4)
         .padding(.horizontal, 2)
         .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(.white.opacity(hover ? 0.08 : 0)))
-        .overlay(alignment: .topTrailing) {
-            if hover {
-                Button { model.removeFromShelf(url) } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 13))
-                        .symbolRenderingMode(.palette)
-                        .foregroundStyle(.white, .gray)
-                }
-                .buttonStyle(.plain)
-                .offset(x: 2, y: -2)
-            }
-        }
         .contentShape(Rectangle())
         .onHover { h in withAnimation(.easeOut(duration: 0.12)) { hover = h } }
         .onTapGesture(count: 2) { NSWorkspace.shared.open(url) }
@@ -626,9 +652,10 @@ struct ToolsTab: View {
     @ObservedObject var model: IslandModel
 
     var body: some View {
-        HStack(spacing: 14) {
+        HStack(spacing: 12) {
             ToolTile(symbol: "eyedropper.halffull", title: "Пипетка") { model.pickColor() }
                 .help("Выбрать цвет на экране и скопировать HEX")
+            PomodoroTile(pomodoro: model.pomodoro)
 
             VStack(alignment: .leading, spacing: 6) {
                 HStack {
@@ -641,19 +668,21 @@ struct ToolsTab: View {
                     }
                 }
                 if model.colorHistory.isEmpty {
-                    Text("Нажми «Пипетку» и кликни в любую точку экрана — HEX-код окажется в буфере обмена")
+                    Text("Выбери цвет пипеткой — HEX сразу окажется в буфере обмена")
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                     Spacer(minLength: 0)
                 } else {
-                    ScrollView(.horizontal, showsIndicators: false) {
+                    HScroll {
                         HStack(spacing: 6) {
                             ForEach(model.colorHistory, id: \.self) { hex in
                                 ColorSwatch(model: model, hex: hex)
                                     .transition(.scale(0.5).combined(with: .opacity))
                             }
                         }
+                        .padding(.vertical, 3)
+                        .padding(.horizontal, 2)
                     }
                 }
             }
@@ -1008,6 +1037,23 @@ enum SpotifySettings {
 }
 
 // MARK: - Small components
+
+/// Horizontal scroll row. In snapshot mode it renders as a plain row, because ImageRenderer
+/// can't draw scroll view contents.
+struct HScroll<Content: View>: View {
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        if Snapshots.active {
+            HStack(spacing: 0) { content }
+                .fixedSize(horizontal: true, vertical: false)
+                .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
+                .clipped()
+        } else {
+            ScrollView(.horizontal, showsIndicators: false) { content }
+        }
+    }
+}
 
 struct ArtworkView: View {
     let image: NSImage?

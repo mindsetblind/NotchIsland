@@ -410,6 +410,12 @@ enum Keychain {
 
 func debugLog(_ message: String) {
     let url = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Logs/NotchIsland.log")
+    // Keep the log small: past 256 KB it becomes NotchIsland.old.log (replacing the previous one).
+    if let size = (try? FileManager.default.attributesOfItem(atPath: url.path))?[.size] as? Int, size > 256 * 1024 {
+        let old = url.deletingLastPathComponent().appendingPathComponent("NotchIsland.old.log")
+        try? FileManager.default.removeItem(at: old)
+        try? FileManager.default.moveItem(at: url, to: old)
+    }
     let line = "\(ISO8601DateFormatter().string(from: Date())) \(message)\n"
     if let h = try? FileHandle(forWritingTo: url) {
         h.seekToEndOfFile()
