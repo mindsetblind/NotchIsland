@@ -87,7 +87,7 @@ struct IslandView: View {
             Color.clear
         case .music:
             CompactMusicView(model: model)
-                .frame(width: model.size(for: .music).width, height: model.notchSize.height)
+                .frame(width: model.size(for: .music).width, height: model.size(for: .music).height)
                 .transition(.islandContent(scale: 0.8))
         case .charging:
             ChargingPeekView(model: model)
@@ -183,11 +183,12 @@ struct CompactMusicView: View {
     @ObservedObject var model: IslandModel
 
     var body: some View {
-        EarsLayout(notchWidth: model.notchSize.width, height: model.notchSize.height) {
-            ArtworkView(image: model.artwork, size: 20, corner: 5)
+        // A bit larger than the notch (wider ears, slightly taller) so the cover is readable at a glance.
+        EarsLayout(notchWidth: model.notchSize.width, height: model.size(for: .music).height) {
+            ArtworkView(image: model.artwork, size: 26, corner: 7)
         } right: {
             EqualizerView(isPlaying: model.nowPlaying?.isPlaying ?? false, tint: .white)
-                .frame(width: 18, height: 14)
+                .frame(width: 22, height: 17)
         }
     }
 }

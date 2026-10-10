@@ -61,7 +61,7 @@ enum Snapshots {
             HStack(spacing: 10) {
                 Text(title).font(.system(size: 10)).foregroundStyle(.black).frame(width: 110, alignment: .trailing)
                 view
-                    .frame(width: ears(state).width, height: notch.height)
+                    .frame(width: ears(state).width, height: model.size(for: state).height)
                     .background(Color.black)
                     .overlay(Rectangle().strokeBorder(.red, lineWidth: 1).frame(width: notch.width))
                     .foregroundStyle(.white)
@@ -70,6 +70,7 @@ enum Snapshots {
             }
         }
         let sheet = VStack(alignment: .leading, spacing: 8) {
+            peek("music", .music, CompactMusicView(model: model))
             peek("charging", .charging, ChargingPeekView(model: model))
             peek("color", .color, ColorPeekView(model: model, hex: "#3A7BD5"))
             peek("pomodoro done", .pomodoroPeek, PomodoroPeekView(model: model, peek:

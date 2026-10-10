@@ -90,12 +90,23 @@ final class PlayerHostView: NSView {
     }
 }
 
-/// What to show where a cover would be, until the cover arrives.
+/// What to show where a cover would be, until the cover arrives:
+/// Resources/placeholder.jpg|png, else the looping placeholder.mp4, else a gradient with a note.
 struct ArtworkPlaceholder: View {
     let corner: CGFloat
 
+    private static let picture: NSImage? = ["jpg", "png"].lazy
+        .compactMap { Bundle.main.url(forResource: "placeholder", withExtension: $0) }
+        .compactMap { NSImage(contentsOf: $0) }
+        .first
+
     var body: some View {
-        if PlaceholderVideo.shared.isAvailable {
+        if let picture = Self.picture {
+            Image(nsImage: picture)
+                .resizable()
+                .interpolation(.high)
+                .aspectRatio(contentMode: .fill)
+        } else if PlaceholderVideo.shared.isAvailable {
             PlaceholderVideoView(corner: corner)
         } else {
             ZStack {

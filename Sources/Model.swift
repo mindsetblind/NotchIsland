@@ -143,7 +143,7 @@ final class IslandModel: ObservableObject {
     func size(for state: IslandState) -> CGSize {
         switch state {
         case .idle:     return notchSize
-        case .music:    return CGSize(width: notchSize.width + 2 * 40, height: notchSize.height)
+        case .music:    return CGSize(width: notchSize.width + 2 * 52, height: notchSize.height + 6)
         case .charging: return CGSize(width: notchSize.width + 2 * 92, height: notchSize.height)
         case .device:   return CGSize(width: notchSize.width + 2 * 150, height: notchSize.height)
         case .color:    return CGSize(width: notchSize.width + 2 * 140, height: notchSize.height)

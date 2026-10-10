@@ -7,8 +7,11 @@ rm -rf $APP
 mkdir -p $APP/Contents/MacOS $APP/Contents/Resources
 cp .build/release/NotchIsland $APP/Contents/MacOS/
 cp Info.plist $APP/Contents/
-# Optional looping video shown while artwork loads (not in git — put your own file there)
-[[ -f Resources/placeholder.mp4 ]] && cp Resources/placeholder.mp4 $APP/Contents/Resources/
+# Optional picture/looping video shown while artwork loads (not in git — put your own files there).
+# A picture wins over a video.
+for f in Resources/placeholder.jpg Resources/placeholder.png Resources/placeholder.mp4; do
+    [[ -f "$f" ]] && cp "$f" $APP/Contents/Resources/
+done
 # Sign with a stable identity so macOS keeps granted permissions (Automation, Bluetooth, Keychain)
 # across rebuilds. Override with SIGN_IDENTITY=...; falls back to ad-hoc signing if none is found.
 IDENTITY="${SIGN_IDENTITY:-$(security find-identity -v -p codesigning 2>/dev/null | awk '/Apple Development|Developer ID Application|NotchIsland/ {print $2; exit}')}"
