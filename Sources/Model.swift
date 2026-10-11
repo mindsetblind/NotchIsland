@@ -595,6 +595,13 @@ final class IslandModel: ObservableObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + 3.5, execute: work)
     }
 
+    // MARK: - Cleaning mode
+
+    func startCleaning(duration: TimeInterval = 120) {
+        setHovering(false)
+        CleaningMode.shared.start(duration: duration)
+    }
+
     // MARK: - Color picker
 
     func pickColor() {

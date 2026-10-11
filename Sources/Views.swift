@@ -672,10 +672,25 @@ struct ToolsTab: View {
             ToolTile(symbol: "eyedropper.halffull", title: "Пипетка") { model.pickColor() }
                 .help("Выбрать цвет на экране и скопировать HEX")
             PomodoroTile(pomodoro: model.pomodoro)
+            ToolTile(symbol: "bubbles.and.sparkles", title: "Чистка") { model.startCleaning() }
+                .help("Чёрный экран, клавиатура и трекпад отключены на 2 минуты. Выход — удерживать Esc 2 с")
+                .contextMenu {
+                    ForEach(CleaningMode.durations, id: \.self) { d in
+                        Button(d < 60 ? "Чистка на \(Int(d)) с" : "Чистка на \(Int(d / 60)) мин") {
+                            model.startCleaning(duration: d)
+                        }
+                    }
+                    Divider()
+                    if CleaningMode.shared.blocksMediaKeys {
+                        Text("Клавиши яркости и громкости тоже блокируются")
+                    } else {
+                        Button("Блокировать и клавиши яркости/громкости…") { CleaningMode.requestMediaKeyBlocking() }
+                    }
+                }
 
             VStack(alignment: .leading, spacing: 6) {
                 HStack {
-                    Text("Последние цвета").font(.system(size: 12, weight: .medium)).foregroundStyle(.secondary)
+                    Text("Цвета").font(.system(size: 12, weight: .medium)).foregroundStyle(.secondary)
                     Spacer()
                     if !model.colorHistory.isEmpty {
                         IconButton(systemName: "trash", size: 10) { model.clearColors() }
@@ -684,7 +699,7 @@ struct ToolsTab: View {
                     }
                 }
                 if model.colorHistory.isEmpty {
-                    Text("Выбери цвет пипеткой — HEX сразу окажется в буфере обмена")
+                    Text("Выбери цвет пипеткой — HEX сразу в буфере")
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
