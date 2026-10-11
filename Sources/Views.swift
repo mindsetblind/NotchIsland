@@ -670,7 +670,6 @@ struct ToolsTab: View {
     var body: some View {
         HStack(spacing: 12) {
             ToolTile(symbol: "eyedropper.halffull", title: "Пипетка") { model.pickColor() }
-                .help("Выбрать цвет на экране и скопировать HEX")
             PomodoroTile(pomodoro: model.pomodoro)
             ToolTile(symbol: "bubbles.and.sparkles", title: "Чистка") { model.startCleaning() }
                 .help("Чёрный экран, клавиатура и трекпад отключены на 2 минуты. Выход — удерживать Esc 2 с")
@@ -699,10 +698,6 @@ struct ToolsTab: View {
                     }
                 }
                 if model.colorHistory.isEmpty {
-                    Text("Выбери цвет пипеткой — HEX сразу в буфере")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
                     Spacer(minLength: 0)
                 } else {
                     HScroll {

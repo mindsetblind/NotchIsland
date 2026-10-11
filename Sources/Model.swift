@@ -107,7 +107,8 @@ final class IslandModel: ObservableObject {
     static let open = Animation.spring(duration: 0.52, bounce: 0.3)
     /// Collapsing: settles without overshoot so it doesn't wobble into the notch.
     static let close = Animation.spring(duration: 0.42, bounce: 0.08)
-    static let hint = Animation.spring(duration: 0.3, bounce: 0.35)
+    /// Hover "lift", like an app icon under the cursor in the app switcher.
+    static let hint = Animation.spring(duration: 0.35, bounce: 0.45)
 
     var state: IslandState {
         if fileDragActive && dropNear { return .drop }
@@ -127,8 +128,8 @@ final class IslandModel: ObservableObject {
     var islandSize: CGSize {
         var s = size(for: state)
         if hoverHint && state != .expanded {
-            s.width += 14
-            s.height += 4
+            s.width += 22
+            s.height += 6
         }
         return s
     }

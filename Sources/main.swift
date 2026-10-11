@@ -30,7 +30,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let model = IslandModel()
     /// One-shot re-check while a hover delay is pending (expand after 0.15 s, collapse after 0.25 s).
     private var recheckTimer: Timer?
-    private var enteredAt: Date?
     /// Drag pasteboard generation at the last mouse-down: a change during dragging means a real drag session.
     private var dragChangeCount = 0
     private var dragWatch: Timer?
@@ -70,6 +69,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.model.toggleFromHotKey()
         }
         if hotKey == nil { NSLog("NotchIsland: Option+Space is already used by another app") }
+        // Click on the collapsed island → open it. The click is consumed so nothing underneath reacts.
+        NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown) { [weak self] event in
+            guard let self, !self.model.isExpanded, !self.model.fileDragActive,
+                  self.islandRect(padding: 8).contains(NSEvent.mouseLocation) else { return event }
+            self.model.setHovering(true)
+            return nil
+        }
         NSEvent.addLocalMonitorForEvents(matching: [.mouseMoved, .leftMouseDragged, .mouseExited]) { [weak self] event in
             self?.trackMouse()
             return event
@@ -157,13 +163,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if inside {
             leftAt = nil
             model.unpin()
-            if enteredAt == nil { enteredAt = now }
-            if !model.isExpanded {
-                model.setHoverHint(true)
-                if now.timeIntervalSince(enteredAt!) > 0.15 { model.setHovering(true) }
-            }
+            // Hover only "lifts" the island; a click opens it (see the mouse-down monitor).
+            if !model.isExpanded { model.setHoverHint(true) }
         } else {
-            enteredAt = nil
             model.setHoverHint(false)
             if model.isExpanded && !model.dragOutActive && !model.pinnedOpen {
                 if leftAt == nil { leftAt = now }
@@ -172,7 +174,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         // The mouse may stop moving while a delay is still running — check again shortly.
-        let pending = (inside && !model.isExpanded) || (!inside && model.isExpanded && !model.pinnedOpen)
+        let pending = !inside && model.isExpanded && !model.pinnedOpen
         recheckTimer?.invalidate()
         recheckTimer = pending
             ? Timer.scheduledTimer(withTimeInterval: 0.05, repeats: false) { [weak self] _ in self?.trackMouse() }
