@@ -67,6 +67,8 @@ struct IslandView: View {
         .foregroundStyle(.white)
         .environment(\.colorScheme, .dark)
         .contextMenu {
+            Button("Настройки…") { model.openSettings() }
+            Divider()
             Button("Spotify Client ID…") { SpotifySettings.askClientID(model: model) }
             if model.spotifyLoggedIn {
                 Button("Выйти из Spotify") { model.spotifyLogout() }
@@ -225,8 +227,10 @@ struct ExpandedView: View {
                     .padding(.leading, IslandModel.inset - 6)
                     .frame(maxWidth: .infinity, alignment: .leading)
             } right: {
-                HStack {
+                HStack(spacing: 0) {
                     Spacer()
+                    IconButton(systemName: "gearshape", size: 11) { model.openSettings() }
+                        .help("Настройки")
                     IconButton(systemName: "power", size: 11) { NSApp.terminate(nil) }
                         .help("Выйти")
                 }
@@ -672,7 +676,7 @@ struct ToolsTab: View {
             ToolTile(symbol: "eyedropper.halffull", title: "Пипетка") { model.pickColor() }
             PomodoroTile(pomodoro: model.pomodoro)
             ToolTile(symbol: "bubbles.and.sparkles", title: "Чистка") { model.startCleaning() }
-                .help("Чёрный экран, клавиатура и трекпад отключены на 2 минуты. Выход — удерживать Esc 2 с")
+                .help("Чёрный экран, клавиатура и трекпад отключены. Выход — удерживать Esc 2 с")
                 .contextMenu {
                     ForEach(CleaningMode.durations, id: \.self) { d in
                         Button(d < 60 ? "Чистка на \(Int(d)) с" : "Чистка на \(Int(d / 60)) мин") {

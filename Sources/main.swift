@@ -34,6 +34,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var dragChangeCount = 0
     private var dragWatch: Timer?
     private var hotKey: HotKey?
+    private var hotKeyObserver: Any?
+    private var enteredAt: Date?
     private var leftAt: Date?
 
     private let canvasSize = CGSize(width: 760, height: 640)
@@ -64,11 +66,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
 
-        // ⌥Space opens/closes the island.
-        hotKey = HotKey(keyCode: kVK_Space, modifiers: optionKey) { [weak self] in
-            self?.model.toggleFromHotKey()
+        // ⌥Space opens/closes the island (can be switched off in Settings).
+        hotKeyObserver = AppSettings.shared.$hotKeyEnabled.sink { [weak self] enabled in
+            guard let self else { return }
+            self.hotKey = enabled
+                ? HotKey(keyCode: kVK_Space, modifiers: optionKey) { [weak self] in self?.model.toggleFromHotKey() }
+                : nil
         }
-        if hotKey == nil { NSLog("NotchIsland: Option+Space is already used by another app") }
         // Click on the collapsed island → open it. The click is consumed so nothing underneath reacts.
         NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown) { [weak self] event in
             guard let self, !self.model.isExpanded, !self.model.fileDragActive,
@@ -160,12 +164,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         panel.ignoresMouseEvents = !inside
 
         let now = Date()
+        let opensOnHover = AppSettings.shared.openMode == .hover
         if inside {
             leftAt = nil
             model.unpin()
-            // Hover only "lifts" the island; a click opens it (see the mouse-down monitor).
-            if !model.isExpanded { model.setHoverHint(true) }
+            if !model.isExpanded {
+                // "Click" mode: hover only lifts the island (a click opens it, see the mouse-down monitor).
+                // "Hover" mode: it opens after resting on it briefly.
+                model.setHoverHint(true)
+                if enteredAt == nil { enteredAt = now }
+                if opensOnHover, now.timeIntervalSince(enteredAt!) > 0.15 { model.setHovering(true) }
+            }
         } else {
+            enteredAt = nil
             model.setHoverHint(false)
             if model.isExpanded && !model.dragOutActive && !model.pinnedOpen {
                 if leftAt == nil { leftAt = now }
@@ -174,7 +185,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         // The mouse may stop moving while a delay is still running — check again shortly.
-        let pending = !inside && model.isExpanded && !model.pinnedOpen
+        let pending = (inside && !model.isExpanded && opensOnHover) || (!inside && model.isExpanded && !model.pinnedOpen)
         recheckTimer?.invalidate()
         recheckTimer = pending
             ? Timer.scheduledTimer(withTimeInterval: 0.05, repeats: false) { [weak self] _ in self?.trackMouse() }

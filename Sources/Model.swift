@@ -83,6 +83,8 @@ final class IslandModel: ObservableObject {
     let media = MediaService()
     let pomodoro = Pomodoro()
     private var pomodoroObserver: Any?
+    private var settingsObserver: Any?
+    let settings = AppSettings.shared
     private var timers: [Timer] = []
     private var peekWork: DispatchWorkItem?
     private var artworkKey: String?
@@ -99,6 +101,10 @@ final class IslandModel: ObservableObject {
         spotifyHasClientID = spotify.clientID != nil
         // Island state depends on the timer, so re-render whenever it changes.
         pomodoroObserver = pomodoro.objectWillChange.sink { [weak self] in self?.objectWillChange.send() }
+        // Toggling what's shown around the notch must re-evaluate the island state right away.
+        settingsObserver = settings.objectWillChange.sink { [weak self] in
+            DispatchQueue.main.async { withAnimation(Self.spring) { self?.objectWillChange.send() } }
+        }
     }
 
     /// General state changes (music started, charging peek).
@@ -117,8 +123,8 @@ final class IslandModel: ObservableObject {
         if pomodoro.peek != nil { return .pomodoroPeek }
         if colorPeek != nil { return .color }
         if devicePeek != nil { return .device }
-        if pomodoro.isRunning { return .pomodoro }
-        if nowPlaying?.isPlaying == true { return .music }
+        if pomodoro.isRunning && settings.showCompactPomodoro { return .pomodoro }
+        if nowPlaying?.isPlaying == true && settings.showCompactMusic { return .music }
         return .idle
     }
 
@@ -586,6 +592,8 @@ final class IslandModel: ObservableObject {
     // MARK: - Devices
 
     private func showDevicePeek(_ event: DeviceEvent) {
+        let isDrive = event.symbol.hasPrefix("externaldrive")
+        guard isDrive ? settings.showDrivePeek : settings.showBluetoothPeek else { return }
         devicePeekWork?.cancel()
         if event.connected { NSHapticFeedbackManager.defaultPerformer.perform(.levelChange, performanceTime: .now) }
         withAnimation(Self.spring) { devicePeek = event }
@@ -596,11 +604,18 @@ final class IslandModel: ObservableObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + 3.5, execute: work)
     }
 
+    // MARK: - Settings
+
+    func openSettings() {
+        setHovering(false)
+        SettingsWindow.shared.show(model: self)
+    }
+
     // MARK: - Cleaning mode
 
-    func startCleaning(duration: TimeInterval = 120) {
+    func startCleaning(duration: TimeInterval? = nil) {
         setHovering(false)
-        CleaningMode.shared.start(duration: duration)
+        CleaningMode.shared.start(duration: duration ?? settings.cleaningDuration)
     }
 
     // MARK: - Color picker
@@ -676,7 +691,7 @@ final class IslandModel: ObservableObject {
         let new = Battery.read()
         let pluggedIn = new.onAC && !battery.onAC
         if new != battery { battery = new }
-        if pluggedIn && new.hasBattery { showChargingPeek() }
+        if pluggedIn && new.hasBattery && settings.showChargingPeek { showChargingPeek() }
     }
 
     private func showChargingPeek() {

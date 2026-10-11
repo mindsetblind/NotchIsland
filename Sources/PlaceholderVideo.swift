@@ -91,17 +91,14 @@ final class PlayerHostView: NSView {
 }
 
 /// What to show where a cover would be, until the cover arrives:
-/// Resources/placeholder.jpg|png, else the looping placeholder.mp4, else a gradient with a note.
+/// the picture chosen in Settings (or Resources/placeholder.jpg|png), else the looping
+/// placeholder.mp4, else a gradient with a note.
 struct ArtworkPlaceholder: View {
     let corner: CGFloat
-
-    private static let picture: NSImage? = ["jpg", "png"].lazy
-        .compactMap { Bundle.main.url(forResource: "placeholder", withExtension: $0) }
-        .compactMap { NSImage(contentsOf: $0) }
-        .first
+    @ObservedObject private var settings = AppSettings.shared
 
     var body: some View {
-        if let picture = Self.picture {
+        if let picture = settings.placeholderPicture {
             Image(nsImage: picture)
                 .resizable()
                 .interpolation(.high)
