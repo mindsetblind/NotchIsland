@@ -7,6 +7,7 @@ rm -rf $APP
 mkdir -p $APP/Contents/MacOS $APP/Contents/Resources
 cp .build/release/NotchIsland $APP/Contents/MacOS/
 cp Info.plist $APP/Contents/
+cp Icon/AppIcon.icns $APP/Contents/Resources/
 # Optional picture/looping video shown while artwork loads (not in git — put your own files there).
 # A picture wins over a video.
 for f in Resources/placeholder.jpg Resources/placeholder.png Resources/placeholder.mp4; do

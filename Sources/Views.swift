@@ -42,14 +42,17 @@ struct IslandView: View {
 
         // Only the black silhouette animates its size. Each content view is laid out once at its
         // final size and revealed by the mask, so text never re-flows mid-animation.
+        // Black is the *background*, not a sibling layer: in a ZStack SwiftUI may draw an outgoing
+        // view below its siblings during the removal transition, so the old content was hidden
+        // behind the black fill and seemed to vanish in a single frame.
         ZStack(alignment: .top) {
-            Color.black
             content
         }
         .frame(width: size.width + tr * 2, height: size.height, alignment: .top)
+        .background(Color.black)
         .clipShape(NotchShape(topRadius: tr, bottomRadius: model.bottomRadius))
         // A blurred shadow re-rendered on every frame of a resize is expensive, so it only
-        // fades in once the island has finished opening, and drops instantly when it closes.
+        // fades in once the island has finished opening, and fades out fast when it closes.
         .shadow(color: .black.opacity(shadowOn ? 0.5 : 0), radius: shadowOn ? 16 : 0, y: shadowOn ? 6 : 0)
         .onChange(of: model.isLarge) { _, large in
             if large {
@@ -58,9 +61,9 @@ struct IslandView: View {
                     withAnimation(.easeOut(duration: 0.2)) { shadowOn = true }
                 }
             } else {
-                var t = Transaction()
-                t.disablesAnimations = true
-                withTransaction(t) { shadowOn = false }
+                // Fade it out quickly. (Removing it inside a no-animation transaction also killed the
+                // collapse animation that runs in the same update — the island snapped shut in one frame.)
+                withAnimation(.easeOut(duration: 0.15)) { shadowOn = false }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
@@ -148,14 +151,16 @@ struct IslandContentEffect: ViewModifier {
 }
 
 extension AnyTransition {
-    static func islandContent(scale: CGFloat) -> AnyTransition {
+    /// `delay`: compact states wait a bit longer so they appear as the shape settles into the notch.
+    static func islandContent(scale: CGFloat, delay: Double? = nil) -> AnyTransition {
         let fx = AnyTransition.modifier(active: IslandContentEffect(progress: 0, scale: scale),
                                         identity: IslandContentEffect(progress: 1, scale: scale))
         return .asymmetric(
             // Appear slightly after the shape starts growing, so content "lands" in it.
-            insertion: fx.animation(.spring(duration: 0.45, bounce: 0.1).delay(0.07)),
-            // Disappear quickly, before the shape shrinks over it.
-            removal: fx.animation(.easeOut(duration: 0.14))
+            insertion: fx.animation(.spring(duration: 0.45, bounce: 0.1).delay(delay ?? (scale <= 0.8 ? 0.12 : 0.07))),
+            // Fade fast at first (ease-out), so the content is mostly gone before the shrinking shape
+            // starts to crop it; it also shrinks toward the notch.
+            removal: fx.animation(.easeOut(duration: 0.15))
         )
     }
 }

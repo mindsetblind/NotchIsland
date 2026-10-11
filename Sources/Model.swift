@@ -111,8 +111,8 @@ final class IslandModel: ObservableObject {
     static let spring = Animation.spring(duration: 0.5, bounce: 0.22)
     /// Expanding: a little livelier, like the iPhone island.
     static let open = Animation.spring(duration: 0.52, bounce: 0.3)
-    /// Collapsing: settles without overshoot so it doesn't wobble into the notch.
-    static let close = Animation.spring(duration: 0.42, bounce: 0.08)
+    /// Collapsing: critically damped — decelerates smoothly into the notch, no overshoot.
+    static let close = Animation.spring(duration: 0.45, bounce: 0)
     /// Hover "lift", like an app icon under the cursor in the app switcher.
     static let hint = Animation.spring(duration: 0.35, bounce: 0.45)
 

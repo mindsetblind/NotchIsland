@@ -52,9 +52,14 @@ Client Secret не нужен (OAuth PKCE), токен хранится в Св�
 
 Диагностика Spotify пишется в `~/Library/Logs/NotchIsland.log` (не больше ~256 КБ, затем ротация).
 
-## Снимки интерфейса
+## Снимки интерфейса и анимаций
 
-Для проверки вёрстки без кликов: `./NotchIsland.app/Contents/MacOS/NotchIsland --snapshots <папка>` — рисует все состояния острова в PNG на тестовых данных и завершается.
+- `./NotchIsland.app/Contents/MacOS/NotchIsland --snapshots <папка>` — рисует все состояния острова в PNG на тестовых данных и завершается.
+- `./NotchIsland.app/Contents/MacOS/NotchIsland --capture-collapse <папка>` — раскрывает и сворачивает остров на сером фоне и сохраняет все кадры сворачивания одной картинкой.
+
+## Иконка
+
+`Icon/IconRenderer.swift` рисует иконку (`Icon/icon-1024.png`), из неё собран `Icon/AppIcon.icns`.
 
 ## Структура
 
@@ -71,6 +76,6 @@ Client Secret не нужен (OAuth PKCE), токен хранится в Св�
 | `Sources/SettingsView.swift` | окно настроек |
 | `Sources/CleaningMode.swift` | режим чистки экрана и клавиатуры |
 | `Sources/Pomodoro.swift` | таймер-помидор и его виды |
-| `Sources/Snapshots.swift` | режим снимков интерфейса для проверки вёрстки |
+| `Sources/Snapshots.swift` | снимки интерфейса и покадровая съёмка сворачивания |
 | `Sources/HotKey.swift` | глобальное сочетание клавиш (⌥Space) |
 | `Sources/LoginItem.swift` | автозапуск при входе |

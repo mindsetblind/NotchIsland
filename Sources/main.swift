@@ -193,7 +193,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 }
 
-MainActor.assumeIsolated { Snapshots.runIfRequested() }
+MainActor.assumeIsolated {
+    Snapshots.runIfRequested()
+    AnimationCapture.runIfRequested()
+}
 
 let app = NSApplication.shared
 let delegate = AppDelegate()

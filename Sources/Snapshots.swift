@@ -117,3 +117,83 @@ enum Snapshots {
         }
     }
 }
+
+/// Debug aid: `NotchIsland --capture-collapse <dir>` opens the island in a small window on a grey
+/// background, expands it, collapses it, and saves every rendered frame of the collapse as a contact sheet.
+@MainActor
+enum AnimationCapture {
+    static func runIfRequested() {
+        let args = CommandLine.arguments
+        guard let i = args.firstIndex(of: "--capture-collapse"), i + 1 < args.count else { return }
+        let dir = URL(fileURLWithPath: args[i + 1])
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        _ = NSApplication.shared
+        NSApp.setActivationPolicy(.accessory)
+
+        let model = IslandModel()
+        model.notchSize = CGSize(width: 185, height: 32)
+        model.refreshMediaNow()
+        let size = NSSize(width: 640, height: 260)
+        let window = NSWindow(contentRect: NSRect(x: 40, y: 40, width: size.width, height: size.height),
+                              styleMask: .borderless, backing: .buffered, defer: false)
+        window.backgroundColor = NSColor(white: 0.55, alpha: 1)
+        let host = NSHostingView(rootView: IslandView(model: model))
+        host.frame = NSRect(origin: .zero, size: size)
+        window.contentView = host
+        window.orderFrontRegardless()
+
+        func pump(_ seconds: Double) { RunLoop.main.run(until: Date().addingTimeInterval(seconds)) }
+        func grab() -> CGImage? {
+            guard let layer = host.layer else { return nil }
+            let scale = 1.0
+            let w = Int(size.width * scale), h = Int(size.height * scale)
+            guard let ctx = CGContext(data: nil, width: w, height: h, bitsPerComponent: 8, bytesPerRow: 0,
+                                      space: CGColorSpaceCreateDeviceRGB(),
+                                      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
+            ctx.setFillColor(NSColor(white: 0.55, alpha: 1).cgColor)
+            ctx.fill(CGRect(x: 0, y: 0, width: w, height: h))
+            if layer.isGeometryFlipped == false && !host.isFlipped {
+                // AppKit layers are bottom-up already.
+            } else {
+                ctx.translateBy(x: 0, y: CGFloat(h))
+                ctx.scaleBy(x: 1, y: -1)
+            }
+            (layer.presentation() ?? layer).render(in: ctx)
+            return ctx.makeImage()
+        }
+
+        pump(0.8)
+        model.setHovering(true)
+        pump(1.2)
+        var frames: [(Double, CGImage)] = []
+        let start = Date()
+        model.setHovering(false)
+        while Date().timeIntervalSince(start) < 0.75 {
+            if let img = grab() { frames.append((Date().timeIntervalSince(start), img)) }
+            pump(1.0 / 60)
+        }
+        window.orderOut(nil)
+
+        // Contact sheet, 6 per row, top 120 px of each frame.
+        let cols = 6, fw = Int(size.width), fh = Int(size.height), label = 16
+        let rows = (frames.count + cols - 1) / cols
+        let W = cols * (fw + 4), H = rows * (fh + label + 4)
+        let ctx = CGContext(data: nil, width: W, height: H, bitsPerComponent: 8, bytesPerRow: 0,
+                            space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+        ctx.setFillColor(NSColor.white.cgColor)
+        ctx.fill(CGRect(x: 0, y: 0, width: W, height: H))
+        NSGraphicsContext.current = NSGraphicsContext(cgContext: ctx, flipped: false)
+        for (n, (t, img)) in frames.enumerated() {
+            let x = (n % cols) * (fw + 4), y = H - (n / cols + 1) * (fh + label + 4)
+            ctx.draw(img, in: CGRect(x: x, y: y, width: fw, height: fh))
+            NSString(string: String(format: "%.0f ms", t * 1000)).draw(at: NSPoint(x: x + 2, y: y + fh + 1),
+                withAttributes: [.font: NSFont.systemFont(ofSize: 12), .foregroundColor: NSColor.black])
+        }
+        if let out = ctx.makeImage(),
+           let png = NSBitmapImageRep(cgImage: out).representation(using: .png, properties: [:]) {
+            try? png.write(to: dir.appendingPathComponent("collapse.png"))
+        }
+        print("\(frames.count) frames")
+        exit(0)
+    }
+}
