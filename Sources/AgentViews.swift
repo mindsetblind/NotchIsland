@@ -172,9 +172,8 @@ struct AgentPeekView: View {
                     // Task finished: an animated check instead of the word "готово".
                     AnimatedCheckmark(size: 20, animated: !Snapshots.active)
                 } else {
-                    Text(peek.text)
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(Color.orange)
+                    // Waiting for you: the matching hollow "!" mark.
+                    AnimatedAttention(size: 20, animated: !Snapshots.active)
                 }
             }
             .padding(.trailing, 14)
@@ -218,6 +217,59 @@ struct AnimatedCheckmark: View {
             withAnimation(.easeOut(duration: 0.1).delay(0.6)) { settle = 1.12 }
             withAnimation(.spring(duration: 0.35, bounce: 0.5).delay(0.7)) { settle = 1 }
         }
+    }
+}
+
+/// Companion of `AnimatedCheckmark` for "waiting for your answer": the ring draws itself, then a "!"
+/// (stem draws, dot pops), then it breathes gently while the notice is shown. System orange,
+/// the color macOS uses for things that need attention.
+struct AnimatedAttention: View {
+    var size: CGFloat = 20
+    var animated = true
+    @State private var ring: CGFloat = 0
+    @State private var stem: CGFloat = 0
+    @State private var dot: CGFloat = 0
+    @State private var breathe = false
+
+    var body: some View {
+        let tint = Color(nsColor: .systemOrange)
+        let line = max(1.5, size * 0.085)
+        ZStack {
+            Circle()
+                .trim(from: 0, to: ring)
+                .stroke(tint, style: StrokeStyle(lineWidth: line, lineCap: .round))
+                .rotationEffect(.degrees(-90))
+            VStack(spacing: size * 0.09) {
+                StemShape()
+                    .trim(from: 0, to: stem)
+                    .stroke(tint, style: StrokeStyle(lineWidth: line * 1.15, lineCap: .round))
+                    .frame(width: line * 1.15, height: size * 0.3)
+                Circle()
+                    .fill(tint)
+                    .frame(width: line * 1.4, height: line * 1.4)
+                    .scaleEffect(dot)
+            }
+        }
+        .padding(line / 2)
+        .frame(width: size, height: size)
+        .scaleEffect(breathe ? 1.08 : 1)
+        .onAppear {
+            guard animated else { ring = 1; stem = 1; dot = 1; return }
+            withAnimation(.easeInOut(duration: 0.45)) { ring = 1 }
+            withAnimation(.easeOut(duration: 0.2).delay(0.38)) { stem = 1 }
+            withAnimation(.spring(duration: 0.3, bounce: 0.6).delay(0.55)) { dot = 1 }
+            withAnimation(.easeInOut(duration: 0.7).repeatForever(autoreverses: true).delay(0.9)) { breathe = true }
+        }
+    }
+}
+
+/// Vertical line from top to bottom (the "!" stem), drawn top-down.
+struct StemShape: Shape {
+    func path(in r: CGRect) -> Path {
+        var p = Path()
+        p.move(to: CGPoint(x: r.midX, y: r.minY))
+        p.addLine(to: CGPoint(x: r.midX, y: r.maxY))
+        return p
     }
 }
 

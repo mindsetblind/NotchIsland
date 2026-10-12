@@ -280,12 +280,14 @@ enum CheckCapture {
         window.backgroundColor = .black
         window.orderFrontRegardless()
         RunLoop.main.run(until: Date().addingTimeInterval(0.3))
-        let host = NSHostingView(rootView: AnimatedCheckmark(size: 64).frame(width: 90, height: 90).background(Color.black))
+        let mark: AnyView = args.contains("--attention")
+            ? AnyView(AnimatedAttention(size: 64)) : AnyView(AnimatedCheckmark(size: 64))
+        let host = NSHostingView(rootView: mark.frame(width: 90, height: 90).background(Color.black))
         host.frame = NSRect(origin: .zero, size: size)
         window.contentView = host
         var frames: [CGImage] = []
         let start = Date()
-        while Date().timeIntervalSince(start) < 1.1 {
+        while Date().timeIntervalSince(start) < (args.contains("--attention") ? 1.8 : 1.1) {
             RunLoop.main.run(until: Date().addingTimeInterval(1.0 / 30))
             let ctx = CGContext(data: nil, width: 90, height: 90, bitsPerComponent: 8, bytesPerRow: 0,
                                 space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
@@ -299,7 +301,7 @@ enum CheckCapture {
         sheet.fill(CGRect(x: 0, y: 0, width: 94 * frames.count, height: 90))
         for (n, f) in frames.enumerated() { sheet.draw(f, in: CGRect(x: n * 94, y: 0, width: 90, height: 90)) }
         if let out = sheet.makeImage(), let png = NSBitmapImageRep(cgImage: out).representation(using: .png, properties: [:]) {
-            try? png.write(to: dir.appendingPathComponent("check.png"))
+            try? png.write(to: dir.appendingPathComponent(args.contains("--attention") ? "attention.png" : "check.png"))
         }
         exit(0)
     }
