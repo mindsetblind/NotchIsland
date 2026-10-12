@@ -2,37 +2,37 @@ import AppKit
 import QuartzCore
 import SwiftUI
 
-/// The always-visible mascot, animated by Core Animation: the system render server runs the loops,
+/// The always-visible pet, animated by Core Animation: the system render server runs the loops,
 /// so the app does no per-frame work (the SwiftUI face cost ~14% CPU while an agent was working).
-/// Snapshot mode falls back to the SwiftUI `MascotFace`, which ImageRenderer can draw.
-struct MascotView: View {
-    let mood: MascotMood
+/// Snapshot mode falls back to the SwiftUI `PetFace`, which ImageRenderer can draw.
+struct PetView: View {
+    let mood: PetMood
     var size: CGFloat = 17
     var gaze: CGFloat? = nil
 
     var body: some View {
         if Snapshots.active {
-            MascotFace(mood: mood, size: size, gaze: gaze)
+            PetFace(mood: mood, size: size, gaze: gaze)
         } else {
-            MascotLayerView(mood: mood, size: size, gaze: gaze)
+            PetLayerView(mood: mood, size: size, gaze: gaze)
                 .frame(width: size * 1.6, height: size * 1.3)
         }
     }
 }
 
-private struct MascotLayerView: NSViewRepresentable {
-    let mood: MascotMood
+private struct PetLayerView: NSViewRepresentable {
+    let mood: PetMood
     let size: CGFloat
     let gaze: CGFloat?
 
-    func makeNSView(context: Context) -> MascotNSView { MascotNSView(size: size) }
+    func makeNSView(context: Context) -> PetNSView { PetNSView(size: size) }
 
-    func updateNSView(_ view: MascotNSView, context: Context) {
+    func updateNSView(_ view: PetNSView, context: Context) {
         view.update(mood: mood, gaze: gaze ?? 0)
     }
 }
 
-final class MascotNSView: NSView {
+final class PetNSView: NSView {
     private let size: CGFloat
     // root ← gaze offset; look ← idle/working glances; body ← hop / tilt / breathing
     private let gazeLayer = CALayer()
@@ -40,7 +40,7 @@ final class MascotNSView: NSView {
     private let bodyLayer = CALayer()
     private let eyes = [CALayer(), CALayer()]
     private let arcs = [CAShapeLayer(), CAShapeLayer()]
-    private var mood: MascotMood?
+    private var mood: PetMood?
     private var gaze: CGFloat = .nan
     private var laidOutSize: CGSize = .zero
 
@@ -97,7 +97,7 @@ final class MascotNSView: NSView {
         if let mood { configure(mood) }
     }
 
-    func update(mood: MascotMood, gaze: CGFloat) {
+    func update(mood: PetMood, gaze: CGFloat) {
         if gaze != self.gaze {
             self.gaze = gaze
             CATransaction.begin()
@@ -113,7 +113,7 @@ final class MascotNSView: NSView {
 
     // MARK: Moods
 
-    private func configure(_ mood: MascotMood) {
+    private func configure(_ mood: PetMood) {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         for l in [lookLayer, bodyLayer] + eyes { l.removeAllAnimations() }

@@ -15,7 +15,7 @@ enum IslandState: Equatable {
     case expanded    // hover
     case drop        // files are being dragged near the notch → AirDrop target
     case permission  // Claude Code asks for permission: card with Allow / Deny
-    case agent       // an agent is working / waiting: mascot face around the notch
+    case agent       // an agent is working / waiting: pet face around the notch
     case agentPeek   // "готово" / "ждёт ответа"
     case notice      // any other activity, generic look (developer tasks, low battery, disk space…)
 }
@@ -125,6 +125,14 @@ final class IslandModel: ObservableObject {
         spotifyHasClientID = spotify.clientID != nil
         // Island state depends on the timer, so re-render whenever it changes.
         pomodoroObserver = pomodoro.objectWillChange.sink { [weak self] in self?.objectWillChange.send() }
+        petAssistantObserver = petAssistant.objectWillChange.sink { [weak self] in self?.objectWillChange.send() }
+        petAssistant.music = PetMusicPlayer(
+            search: { [weak self] music in try await self?.petPlay(music) ?? "" },
+            sources: { [weak self] in await self?.petMusicSources() ?? [] },
+            tracks: { [weak self] source in try await self?.spotify.tracks(of: source) ?? [] },
+            play: { [weak self] source, track in try await self?.petPlay(source, track: track) ?? "" },
+            quickPlay: { [weak self] name, type in try await self?.petQuickPlay(name, type: type) },
+            control: { [weak self] command in self?.petControl(command) ?? "" })
         // Claude Code sends an event for every tool call; the island itself only cares whether agents
         // work, wait or are done (and about permission cards). Re-render only when that changes —
         // the Agents tab observes the monitor directly for the details.
@@ -252,12 +260,12 @@ final class IslandModel: ObservableObject {
     static let contentBottom: CGFloat = 20
     static let playlistHeight: CGFloat = 230
 
-    /// Width of each "ear" when only the mascot is shown (it sits in the right one).
-    static let mascotEar: CGFloat = 40
+    /// Width of each "ear" when only the pet is shown (it sits in the right one).
+    static let petEar: CGFloat = 40
 
     func size(for state: IslandState) -> CGSize {
         switch state {
-        case .idle:     return showsMascot ? CGSize(width: notchSize.width + 2 * Self.mascotEar, height: notchSize.height)
+        case .idle:     return showsPet ? CGSize(width: notchSize.width + 2 * Self.petEar, height: notchSize.height)
                                            : notchSize
         // Collapsed states never go below the menu bar (= notch height), so they can't cover
         // the top of full-screen windows.
@@ -265,7 +273,7 @@ final class IslandModel: ObservableObject {
         case .charging: return CGSize(width: notchSize.width + 2 * 92, height: notchSize.height)
         case .device:   return CGSize(width: notchSize.width + 2 * 150, height: notchSize.height)
         case .color:    return CGSize(width: notchSize.width + 2 * 140, height: notchSize.height)
-        case .pomodoro: return CGSize(width: notchSize.width + 2 * (showsMascot ? 84 : 58), height: notchSize.height)
+        case .pomodoro: return CGSize(width: notchSize.width + 2 * (showsPet ? 84 : 58), height: notchSize.height)
         case .pomodoroPeek: return CGSize(width: notchSize.width + 2 * 160, height: notchSize.height)
         case .drop:     return CGSize(width: max(540, notchSize.width + 350), height: notchSize.height + 112)
         case .permission: return CGSize(width: max(480, notchSize.width + 290), height: notchSize.height + 118)
@@ -278,16 +286,20 @@ final class IslandModel: ObservableObject {
         }
     }
 
-    // MARK: - Mascot (always visible right of the notch)
+    // MARK: - Pet (always visible right of the notch)
 
     /// Set from the mouse tracker: -1…1 = cursor left/right of the face; nil = too far to care.
-    @Published private(set) var mascotGaze: CGFloat?
+    @Published private(set) var petGaze: CGFloat?
     private var happyUntil = Date.distantPast
-    private var lastMascotMood: MascotMood?
+    private var lastPetMood: PetMood?
 
-    var showsMascot: Bool { settings.mascotAlwaysVisible }
+    /// While the pet is out helping (⌥⇧Space), its spot right of the notch stays empty.
+    var showsPet: Bool { settings.petAlwaysVisible && !petAssistant.isOpen }
+    let petAssistant = PetAssistant.shared
+    private var petAssistantObserver: Any?
 
-    var mascotMood: MascotMood {
+    var petMood: PetMood {
+        if let mood = petAssistant.earMood { return mood }
         if claude.isAnyWaiting { return .attention }
         if claude.isAnyWorking { return .working }
         // Only a short burst of joy: a finished Claude session stays "done" for minutes, and a face
@@ -302,17 +314,17 @@ final class IslandModel: ObservableObject {
     private var isSleepy: Bool {
         let idle = CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: CGEventType(rawValue: ~0)!)
         if idle > 5 * 60 { return true }
-        guard settings.mascotSleepsAtNight else { return false }
+        guard settings.petSleepsAtNight else { return false }
         // At night it dozes off sooner — but not while you're actually using the Mac.
         let hour = Calendar.current.component(.hour, from: Date())
         return hour >= 1 && hour < 6 && idle > 60
     }
 
-    func setMascotGaze(_ gaze: CGFloat?) {
-        // Any mouse movement wakes a sleeping mascot right away (not on the next periodic check).
-        if lastMascotMood == .sleeping { checkMascotMood() }
-        guard gaze != mascotGaze else { return }
-        mascotGaze = gaze
+    func setPetGaze(_ gaze: CGFloat?) {
+        // Any mouse movement wakes a sleeping pet right away (not on the next periodic check).
+        if lastPetMood == .sleeping { checkPetMood() }
+        guard gaze != petGaze else { return }
+        petGaze = gaze
     }
 
     /// A short happy hop: file shelved, color copied, AirDrop sent…
@@ -323,10 +335,10 @@ final class IslandModel: ObservableObject {
     }
 
     /// Moods that change with time (sleep) don't trigger a re-render by themselves — check now and then.
-    private func checkMascotMood() {
-        let mood = mascotMood
-        guard mood != lastMascotMood else { return }
-        lastMascotMood = mood
+    private func checkPetMood() {
+        let mood = petMood
+        guard mood != lastPetMood else { return }
+        lastPetMood = mood
         objectWillChange.send()
     }
 
@@ -348,7 +360,7 @@ final class IslandModel: ObservableObject {
         power.start()
         startSystemActivities()
         let mood = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated { self?.checkMascotMood() }
+            MainActor.assumeIsolated { self?.checkPetMood() }
         }
         mood.tolerance = 1
         timers.append(mood)
@@ -462,7 +474,7 @@ final class IslandModel: ObservableObject {
     func systemDidWake() {
         refreshMedia()
         refreshBattery()
-        checkMascotMood()
+        checkPetMood()
         disk.check()
         calendar.reschedule()
     }
@@ -685,6 +697,114 @@ final class IslandModel: ObservableObject {
                 }
             }
         }
+    }
+
+    /// Pet: "включи …". Finds it through the Web API and starts it in the Spotify app.
+    func petPlay(_ music: PetMusic) async throws -> String {
+        guard spotifyLoggedIn else {
+            // Without a Spotify login there is no search API: at least open Spotify's own search.
+            let q = music.query.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? ""
+            if let url = URL(string: "spotify:search:\(q)") { NSWorkspace.shared.open(url) }
+            return "Открыл поиск в Spotify. Чтобы я включал музыку сам, подключи Spotify в настройках NotchIsland."
+        }
+        guard let hit = try await spotify.search(music.query, type: music.type.rawValue) else {
+            throw PetMusicError("В Spotify ничего не нашлось по «\(music.query)»")
+        }
+        guard await spotifyStart(hit.uri) else {
+            throw PetMusicError("Нашёл «\(hit.title)», но Spotify не начал играть")
+        }
+        try? await Task.sleep(for: .milliseconds(400))
+        refreshMedia()
+        return hit.subtitle.isEmpty ? hit.title : "\(hit.title) — \(hit.subtitle)"
+    }
+
+    /// Starts something in Spotify without bringing it to the front: Web API first (silent, Premium),
+    /// AppleScript as a fallback — after which Spotify is hidden and your app gets focus back.
+    private func spotifyStart(_ uri: String, context: String? = nil) async -> Bool {
+        guard await media.launchSpotifyHidden() else { return false }
+        if spotifyLoggedIn {
+            do {
+                if uri.hasPrefix("spotify:track:") || uri.hasPrefix("spotify:episode:") {
+                    try await spotify.play(trackURI: uri, contextURI: context)
+                } else {
+                    try await spotify.play(contextURI: uri)
+                }
+                return true
+            } catch {
+                debugLog("pet: web play failed (\(error.localizedDescription)) → AppleScript")
+            }
+        }
+        let front = NSWorkspace.shared.frontmostApplication
+        let ok = await media.playSpotifyScript(uri: uri, context: context)
+        if front?.bundleIdentifier != MediaSource.spotify.bundleID {
+            try? await Task.sleep(for: .milliseconds(300))
+            NSRunningApplication.runningApplications(withBundleIdentifier: MediaSource.spotify.bundleID).first?.hide()
+            front?.activate()
+        }
+        return ok
+    }
+
+    /// "включи <name>": a playlist/album of yours with that name, else the best Spotify match.
+    func petQuickPlay(_ name: String, type: PetMusic.Kind?) async throws -> String? {
+        guard spotifyLoggedIn else { return nil }   // no search without a login: let Claude handle it
+        let wanted = SpotifyWeb.normalized(name)
+        if type == nil || type == .playlist || type == .album {
+            let library = await petMusicSources()
+            let match = library.first { SpotifyWeb.normalized($0.name) == wanted }
+                ?? (wanted.count >= 4 ? library.first { SpotifyWeb.normalized($0.name).hasPrefix(wanted) } : nil)
+            if let match { return try await petPlay(match, track: nil) }
+        }
+        let found: SpotifyWeb.SearchHit?
+        if let type { found = try await spotify.search(name, type: type.rawValue) } else { found = try await spotify.searchBest(name) }
+        guard let found, !found.uri.isEmpty else { return nil }
+        guard await spotifyStart(found.uri) else { throw PetMusicError("Нашёл «\(found.title)», но Spotify не начал играть") }
+        try? await Task.sleep(for: .milliseconds(400))
+        refreshMedia()
+        return found.subtitle.isEmpty ? found.title : "\(found.title) — \(found.subtitle)"
+    }
+
+    func petControl(_ command: PetQuickIntent.Media) -> String {
+        let playing = nowPlaying?.isPlaying == true
+        switch command {
+        case .pause:
+            if playing { perform(.playPause) }
+            return "Пауза"
+        case .resume:
+            if !playing { perform(.playPause) }
+            return "Играет дальше"
+        case .next:
+            perform(.next)
+            return "Следующий трек"
+        case .previous:
+            perform(.previous)
+            return "Предыдущий трек"
+        }
+    }
+
+    private var petSourcesCache: (at: Date, sources: [PetMusicSource])?
+
+    /// "@" tags for the pet; the library rarely changes, so it's fetched at most every 5 minutes.
+    func petMusicSources() async -> [PetMusicSource] {
+        guard spotifyLoggedIn else { return [] }
+        if let cache = petSourcesCache, Date().timeIntervalSince(cache.at) < 300 { return cache.sources }
+        do {
+            let sources = try await spotify.librarySources()
+            petSourcesCache = (Date(), sources)
+            debugLog("pet: library liked=\(sources.filter { $0.kind == .liked }.count) playlists=\(sources.filter { $0.kind == .playlist }.count) albums=\(sources.filter { $0.kind == .album }.count)")
+            return sources
+        } catch {
+            debugLog("pet: library failed: \(error.localizedDescription)")
+            return petSourcesCache?.sources ?? []
+        }
+    }
+
+    func petPlay(_ source: PetMusicSource, track: PlaylistTrack?) async throws -> String {
+        let ok = await spotifyStart(track?.uri ?? source.uri, context: track == nil ? nil : source.uri)
+        guard ok else { throw PetMusicError("Spotify не начал играть «\(source.name)»") }
+        try? await Task.sleep(for: .milliseconds(400))
+        refreshMedia()
+        guard let track else { return source.name }
+        return "\(track.name) — \(track.artist) · из «\(source.name)»"
     }
 
     func play(_ track: PlaylistTrack) {

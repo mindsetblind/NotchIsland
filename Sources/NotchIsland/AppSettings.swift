@@ -22,8 +22,12 @@ final class AppSettings: ObservableObject {
     @Published var cleaningDuration: TimeInterval { didSet { save(cleaningDuration, "cleaningDuration") } }
     @Published var claudePermissionsInIsland: Bool { didSet { save(claudePermissionsInIsland, "claudePermissionsInIsland") } }
     @Published var claudeSounds: Bool { didSet { save(claudeSounds, "claudeSounds") } }
-    @Published var mascotAlwaysVisible: Bool { didSet { save(mascotAlwaysVisible, "mascotAlwaysVisible") } }
-    @Published var mascotSleepsAtNight: Bool { didSet { save(mascotSleepsAtNight, "mascotSleepsAtNight") } }
+    @Published var petAlwaysVisible: Bool { didSet { save(petAlwaysVisible, "mascotAlwaysVisible") } }
+    @Published var petSleepsAtNight: Bool { didSet { save(petSleepsAtNight, "mascotSleepsAtNight") } }
+    /// ⌥⇧Space calls the pet out of the notch to help with files.
+    @Published var petHotKeyEnabled: Bool { didSet { save(petHotKeyEnabled, "petHotKeyEnabled") } }
+    /// Claude model the pet thinks with: "sonnet" (smarter) or "haiku" (faster).
+    @Published var petModel: String { didSet { save(petModel, "petModel") } }
     /// Alert/activity kinds switched off by the user (empty = everything on; new kinds start enabled).
     @Published var disabledActivities: Set<ActivityKind> {
         didSet { save(disabledActivities.map(\.rawValue).sorted(), "disabledActivities") }
@@ -66,8 +70,10 @@ final class AppSettings: ObservableObject {
         cleaningDuration = d.object(forKey: "cleaningDuration") as? Double ?? 120
         claudePermissionsInIsland = bool("claudePermissionsInIsland", true)
         claudeSounds = bool("claudeSounds", true)
-        mascotAlwaysVisible = bool("mascotAlwaysVisible", true)
-        mascotSleepsAtNight = bool("mascotSleepsAtNight", true)
+        petAlwaysVisible = bool("mascotAlwaysVisible", true)
+        petSleepsAtNight = bool("mascotSleepsAtNight", true)
+        petHotKeyEnabled = bool("petHotKeyEnabled", true)
+        petModel = d.string(forKey: "petModel") ?? "sonnet"
         clipboardEnabled = bool("clipboardEnabled", false)
         clipboardPaused = bool("clipboardPaused", false)
         clipboardMaxItems = d.object(forKey: "clipboardMaxItems") as? Int ?? 50

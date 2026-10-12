@@ -1,6 +1,6 @@
 import SwiftUI
 
-enum MascotMood: Equatable {
+enum PetMood: Equatable {
     case idle        // calm, blinks now and then
     case working     // eyes dart left and right
     case attention   // wide eyes, small hop — needs you
@@ -11,8 +11,8 @@ enum MascotMood: Equatable {
 
 /// Minimal face: two pill eyes, no mouth (style "A"). `size` is the face height in points.
 /// Animations are short SwiftUI loops that only run while the face is on screen.
-struct MascotFace: View {
-    let mood: MascotMood
+struct PetFace: View {
+    let mood: PetMood
     var size: CGFloat = 18
     /// -1…1: where the cursor is (left/right of the face). Overrides the idle glances while set.
     var gaze: CGFloat? = nil

@@ -226,6 +226,33 @@ final class MediaService: @unchecked Sendable {
         runAsync("tell application \"Music\" to play (first track of current playlist whose database ID is \(id))")
     }
 
+    /// Starts Spotify hidden (no window, no focus change) if it isn't running. False if it isn't installed.
+    func launchSpotifyHidden() async -> Bool {
+        if MediaSource.spotify.isRunning { return true }
+        guard let app = NSWorkspace.shared.urlForApplication(withBundleIdentifier: MediaSource.spotify.bundleID) else { return false }
+        let config = NSWorkspace.OpenConfiguration()
+        config.activates = false
+        config.hides = true
+        _ = try? await NSWorkspace.shared.openApplication(at: app, configuration: config)
+        for _ in 0..<40 where !MediaSource.spotify.isRunning { try? await Task.sleep(for: .milliseconds(200)) }
+        try? await Task.sleep(for: .seconds(2))   // until it's ready for commands and shows up as a device
+        return MediaSource.spotify.isRunning
+    }
+
+    /// Starts a Spotify URI (track, album, artist or playlist) through AppleScript — works without
+    /// Premium, but Spotify opens that page and jumps to the front (the caller hides it again).
+    /// `context`: play `uri` (a track) inside this playlist/album/Liked Songs, so it continues from there.
+    func playSpotifyScript(uri: String, context: String? = nil) async -> Bool {
+        let pattern = #"^spotify:[a-z]+(:[A-Za-z0-9._-]+)+$"#
+        guard uri.range(of: pattern, options: .regularExpression) != nil,
+              context.map({ $0.range(of: pattern, options: .regularExpression) != nil }) ?? true,
+              await launchSpotifyHidden() else { return false }
+        return await withCheckedContinuation { cont in
+            let inContext = context.map { " in context \"\($0)\"" } ?? ""
+            queue.async { cont.resume(returning: self.execute("tell application \"Spotify\" to play track \"\(uri)\"\(inContext)").error == nil) }
+        }
+    }
+
     func setShuffle(_ on: Bool, for source: MediaSource) {
         let property = source == .spotify ? "shuffling" : "shuffle enabled"
         runAsync("tell application \"\(source.rawValue)\" to set \(property) to \(on)")

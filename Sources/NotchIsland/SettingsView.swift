@@ -78,11 +78,20 @@ struct PeekSettings: View {
                 Toggle("Обложка и эквалайзер, когда играет музыка", isOn: $settings.showCompactMusic)
                 Toggle("Таймер помидора", isOn: $settings.showCompactPomodoro)
             }
-            Section("Маскот") {
-                Toggle("Всегда виден справа от выреза", isOn: $settings.mascotAlwaysVisible)
-                Toggle("Засыпает ночью (с 1 до 6)", isOn: $settings.mascotSleepsAtNight)
-                    .disabled(!settings.mascotAlwaysVisible)
+            Section("Pet") {
+                Toggle("Всегда виден справа от выреза", isOn: $settings.petAlwaysVisible)
+                Toggle("Засыпает ночью (с 1 до 6)", isOn: $settings.petSleepsAtNight)
+                    .disabled(!settings.petAlwaysVisible)
                 Text("Следит за курсором, танцует под музыку, «думает», пока работает Claude Code, зовёт, когда он ждёт ответа, и засыпает, если долго не трогать Mac.")
+                    .font(.callout).foregroundStyle(.secondary)
+            }
+            Section("Pet-помощник") {
+                Toggle("Вызывать по ⌥⇧Space", isOn: $settings.petHotKeyEnabled)
+                Picker("Модель", selection: $settings.petModel) {
+                    Text("Sonnet — точнее").tag("sonnet")
+                    Text("Haiku — быстрее").tag("haiku")
+                }
+                Text("Pet вылезает из выреза и помогает с файлами: найти, разложить по папкам, переименовать, сжать, убрать в Корзину. А ещё включает музыку в Spotify по просьбе — «включи Radiohead», «что-нибудь для работы»; через @ можно указать плейлист или альбом из медиатеки (нужен вход в Spotify выше). Думает через Claude Code (нужен вход: claude auth login), сам ничего не меняет — сначала показывает план, а сделанное можно отменить. Работает только в домашней папке, кроме ~/Library и скрытых файлов.")
                     .font(.callout).foregroundStyle(.secondary)
             }
             Section("Короткие уведомления у выреза") {

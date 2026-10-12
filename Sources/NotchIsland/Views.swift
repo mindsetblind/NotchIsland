@@ -89,8 +89,8 @@ struct IslandView: View {
     @ViewBuilder private var content: some View {
         switch model.state {
         case .idle:
-            if model.showsMascot {
-                MascotEarView(model: model)
+            if model.showsPet {
+                PetEarView(model: model)
                     .frame(width: model.size(for: .idle).width, height: model.notchSize.height)
                     .transition(.islandContent(scale: 0.8))
             } else {
@@ -225,9 +225,9 @@ struct CompactMusicView: View {
         EarsLayout(notchWidth: model.notchSize.width, height: model.size(for: .music).height) {
             ArtworkView(image: model.artwork, size: 26, corner: 7)
         } right: {
-            if model.showsMascot {
-                // The mascot's eyes bounce like equalizer bars while music plays.
-                MascotView(mood: model.mascotMood, size: 17, gaze: model.mascotGaze)
+            if model.showsPet {
+                // The pet's eyes bounce like equalizer bars while music plays.
+                PetView(mood: model.petMood, size: 17, gaze: model.petGaze)
             } else {
                 EqualizerView(isPlaying: model.nowPlaying?.isPlaying ?? false, tint: .white)
                     .frame(width: 22, height: 17)
@@ -236,15 +236,15 @@ struct CompactMusicView: View {
     }
 }
 
-/// Collapsed island with nothing else going on: just the mascot, right of the notch.
-struct MascotEarView: View {
+/// Collapsed island with nothing else going on: just the pet, right of the notch.
+struct PetEarView: View {
     @ObservedObject var model: IslandModel
 
     var body: some View {
         EarsLayout(notchWidth: model.notchSize.width, height: model.notchSize.height) {
             Color.clear
         } right: {
-            MascotView(mood: model.mascotMood, size: 17, gaze: model.mascotGaze)
+            PetView(mood: model.petMood, size: 17, gaze: model.petGaze)
         }
     }
 }

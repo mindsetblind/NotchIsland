@@ -310,8 +310,8 @@ struct PomodoroCompactView: View {
                     Text(formatTimer(pomodoro.remaining(at: ctx.date)))
                         .font(.system(size: 12, weight: .semibold, design: .rounded).monospacedDigit())
                         .foregroundStyle(pomodoro.phase.color)
-                    if model.showsMascot {
-                        MascotView(mood: model.mascotMood, size: 16, gaze: model.mascotGaze)
+                    if model.showsPet {
+                        PetView(mood: model.petMood, size: 16, gaze: model.petGaze)
                     }
                 }
             }

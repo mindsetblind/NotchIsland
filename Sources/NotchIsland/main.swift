@@ -40,6 +40,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// ⌃⌥V: clipboard history search (opt-in, see Settings).
     private var clipboardKey: HotKey?
     private var clipboardKeyObserver: Any?
+    /// ⌥⇧Space: the pet climbs out of the notch to help with files.
+    private var petKey: HotKey?
+    private var petKeyObserver: Any?
     /// Space = play/pause, but only while the island is open on the Music tab.
     private var spaceKey: HotKey?
     private var stateObserver: Any?
@@ -114,6 +117,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                         : nil
                 }
             }
+        PetPanelController.shared.placement = { [weak self] in
+            guard let self, let screen = self.screen else { return nil }
+            return (screen, self.model.notchSize)
+        }
+        petKeyObserver = AppSettings.shared.$petHotKeyEnabled.sink { [weak self] enabled in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.petKey = enabled
+                    ? HotKey(keyCode: kVK_Space, modifiers: optionKey | shiftKey) { [weak self] in
+                        MainActor.assumeIsolated {
+                            self?.model.setHovering(false)
+                            PetPanelController.shared.toggle()
+                        }
+                    }
+                    : nil
+            }
+        }
         model.islandScreenRect = { [weak self] in
             guard let info = self?.screenInfo, let model = self?.model else { return nil }
             return ScreenPlacement.islandRect(size: model.notchSize, padding: 0, on: info)
@@ -211,17 +231,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             : nil
     }
 
-    /// The mascot follows the cursor with its eyes when it's near the top of the screen.
-    private func updateMascotGaze(mouse: NSPoint, screen: NSScreen) {
-        guard model.showsMascot, !model.isExpanded else { return model.setMascotGaze(nil) }
+    /// The pet follows the cursor with its eyes when it's near the top of the screen.
+    private func updatePetGaze(mouse: NSPoint, screen: NSScreen) {
+        guard model.showsPet, !model.isExpanded else { return model.setPetGaze(nil) }
         // The face sits in the middle of the right ear, whose width depends on the current state.
         let half = model.size(for: model.state).width / 2
         let earStart = model.notchSize.width / 2 + EarsLayout<EmptyView, EmptyView>.notchGap
         let faceX = screen.frame.midX + (earStart + half) / 2
         let fromTop = screen.frame.maxY - mouse.y
-        guard fromTop < 260 else { return model.setMascotGaze(nil) }
+        guard fromTop < 260 else { return model.setPetGaze(nil) }
         let raw = max(-1, min(1, (mouse.x - faceX) / 220))
-        model.setMascotGaze((raw * 4).rounded() / 4)   // quarter steps: no re-render on every pixel
+        model.setPetGaze((raw * 4).rounded() / 4)   // quarter steps: no re-render on every pixel
     }
 
     private func islandRect(padding pad: CGFloat) -> CGRect {
@@ -232,7 +252,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func trackMouse() {
         guard let screen = targetScreen else { return }
         let mouse = NSEvent.mouseLocation
-        updateMascotGaze(mouse: mouse, screen: screen)
+        updatePetGaze(mouse: mouse, screen: screen)
 
         if model.fileDragActive {
             // Generous zone around the notch so the drop target opens before you hit it exactly.
@@ -279,8 +299,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 MainActor.assumeIsolated {
     Snapshots.runIfRequested()
     AnimationCapture.runIfRequested()
-    MascotCapture.runIfRequested()
+    PetCapture.runIfRequested()
     CheckCapture.runIfRequested()
+    PetPanelCapture.runIfRequested()
+    PetAskBench.runIfRequested()
     SearchCapture.runIfRequested()
     TabsCapture.runIfRequested()
     GazeBenchmark.runIfRequested()

@@ -5,6 +5,7 @@
     <key>CFBundleIdentifier</key><string>local.notchisland</string>
     <key>CFBundleName</key><string>NotchIsland</string>
     <key>CFBundleExecutable</key><string>NotchIsland</string>
+    <key>CFBundleDevelopmentRegion</key><string>ru</string>
     <key>CFBundleIconFile</key><string>AppIcon</string>
     <key>CFBundlePackageType</key><string>APPL</string>
     <key>CFBundleShortVersionString</key><string>1.0</string>
@@ -14,6 +15,6 @@
     <key>NSBluetoothAlwaysUsageDescription</key><string>NotchIsland показывает, когда подключаются AirPods и другие Bluetooth-устройства.</string>
     <key>NSCalendarsFullAccessUsageDescription</key><string>NotchIsland напоминает о ближайших событиях у выреза. События читаются только на этом Mac.</string>
     <key>NSCalendarsUsageDescription</key><string>NotchIsland напоминает о ближайших событиях у выреза. События читаются только на этом Mac.</string>
-    <key>NSAppleEventsUsageDescription</key><string>NotchIsland показывает текущий трек и управляет воспроизведением в Музыке и Spotify.</string>
+    <key>NSAppleEventsUsageDescription</key><string>NotchIsland показывает текущий трек и управляет воспроизведением в Музыке и Spotify, а pet узнаёт, какая папка открыта в Finder.</string>
 </dict>
 </plist>

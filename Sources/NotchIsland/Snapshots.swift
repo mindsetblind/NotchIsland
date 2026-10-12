@@ -98,7 +98,7 @@ enum Snapshots {
             }
         }
         let sheet = VStack(alignment: .leading, spacing: 8) {
-            peek("mascot", .idle, MascotEarView(model: model))
+            peek("pet", .idle, PetEarView(model: model))
             peek("music", .music, CompactMusicView(model: model))
             peek("agent", .agent, AgentCompactView(model: model, claude: model.claude))
             peek("agent done", .agentPeek, AgentPeekView(model: model, peek: AgentPeek(project: "NotchIsland", text: "готово", mood: .happy)))
@@ -240,25 +240,25 @@ enum AnimationCapture {
     }
 }
 
-/// Debug aid: `NotchIsland --capture-mascot <dir>` renders the Core Animation mascot in every mood,
+/// Debug aid: `NotchIsland --capture-pet <dir>` renders the Core Animation pet in every mood,
 /// a few moments apart, into one sheet.
 @MainActor
-enum MascotCapture {
+enum PetCapture {
     static func runIfRequested() {
         let args = CommandLine.arguments
-        guard let i = args.firstIndex(of: "--capture-mascot"), i + 1 < args.count else { return }
+        guard let i = args.firstIndex(of: "--capture-pet"), i + 1 < args.count else { return }
         let dir = URL(fileURLWithPath: args[i + 1])
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         _ = NSApplication.shared
         NSApp.setActivationPolicy(.accessory)
 
-        let moods: [MascotMood] = [.idle, .working, .attention, .happy, .sleeping, .dancing]
+        let moods: [PetMood] = [.idle, .working, .attention, .happy, .sleeping, .dancing]
         let cell = NSSize(width: 140, height: 110)
         let window = NSWindow(contentRect: NSRect(x: 40, y: 40, width: cell.width * CGFloat(moods.count), height: cell.height),
                               styleMask: .borderless, backing: .buffered, defer: false)
         window.backgroundColor = .black
-        let views = moods.map { mood -> MascotNSView in
-            let v = MascotNSView(size: 64)
+        let views = moods.map { mood -> PetNSView in
+            let v = PetNSView(size: 64)
             v.update(mood: mood, gaze: 0)
             return v
         }
@@ -292,7 +292,7 @@ enum MascotCapture {
             sheet.draw(img, in: CGRect(x: 0, y: (shots.count - 1 - n) * (H + 4), width: W, height: H))
         }
         if let out = sheet.makeImage(), let png = NSBitmapImageRep(cgImage: out).representation(using: .png, properties: [:]) {
-            try? png.write(to: dir.appendingPathComponent("mascot.png"))
+            try? png.write(to: dir.appendingPathComponent("pet.png"))
         }
         exit(0)
     }
@@ -462,7 +462,7 @@ enum TabsCapture {
     }
 }
 
-/// Debug aid: `NotchIsland --bench-gaze` hosts the real island in a window and drives the mascot's
+/// Debug aid: `NotchIsland --bench-gaze` hosts the real island in a window and drives the pet's
 /// gaze the way cursor movement near the top of the screen does (~60 changes/s for 6 s), then prints
 /// the CPU time the process spent. Used to measure per-update cost of the island view.
 @MainActor
@@ -488,7 +488,7 @@ enum GazeBenchmark {
         let c0 = cpu(), t0 = Date()
         var i = 0
         while Date().timeIntervalSince(t0) < 6 {
-            model.setMascotGaze((CGFloat(sin(Double(i) * 0.15)) * 4).rounded() / 4)
+            model.setPetGaze((CGFloat(sin(Double(i) * 0.15)) * 4).rounded() / 4)
             i += 1
             pump(1.0 / 60)
         }
@@ -579,10 +579,10 @@ enum StatesBenchmark {
             for _ in 0..<5 { measure("  idle after device") {} }
             exit(0)
         }
-        measure("idle (mascot)") {}
+        measure("idle (pet)") {}
         measure("sound Glass") { NSSound(named: "Glass")?.play() }
         measure("idle after sound") {}
-        measure("mascot happy (cheer)") { model.cheer() }
+        measure("pet happy (cheer)") { model.cheer() }
         measure("idle after cheer") {}
         measure("agent done (checkmark)") {
             model.post(.agent, "a", .agentPeek(AgentPeek(project: "NotchIsland", text: "готово", mood: .happy)), duration: 30)
@@ -608,5 +608,102 @@ enum StatesBenchmark {
         model.pomodoro.reset()
         measure("back to idle") {}
         exit(0)
+    }
+}
+
+/// Debug aid: `NotchIsland --capture-pet-panel <dir>` renders the pet's file assistant panel in each
+/// state (sample plans, no Claude call) and saves one PNG per state.
+@MainActor
+enum PetPanelCapture {
+    static func runIfRequested() {
+        let args = CommandLine.arguments
+        guard let i = args.firstIndex(of: "--capture-pet-panel"), i + 1 < args.count else { return }
+        let dir = URL(fileURLWithPath: args[i + 1])
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        _ = NSApplication.shared
+        NSApp.setActivationPolicy(.accessory)
+
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        let desk = home + "/Desktop"
+        let assistant = PetAssistant.shared
+        let state = PetPanelState()
+        state.notch = CGSize(width: 185, height: 32)
+        state.shown = true
+        let context = PetContext(folder: URL(fileURLWithPath: desk),
+                                 files: [URL(fileURLWithPath: desk + "/Снимок экрана 1.png")])
+        let tidy = PetPlan(reply: "Нашёл 3 скриншота на рабочем столе — сложу их в новую папку «Скриншоты».", actions: [
+            PetAction(.mkdir, desk + "/Скриншоты"),
+            PetAction(.move, desk + "/Снимок экрана 1.png", to: desk + "/Скриншоты/Снимок экрана 1.png"),
+            PetAction(.move, desk + "/Снимок экрана 2.png", to: desk + "/Скриншоты/Снимок экрана 2.png"),
+            PetAction(.move, desk + "/черновик.txt", to: desk + "/план отпуска.txt"),
+            PetAction(.trash, desk + "/старый архив.zip"),
+        ])
+        let found = PetPlan(reply: "Вот что похоже на договор аренды:", files: [
+            home + "/Documents/Договор аренды 2026.pdf", home + "/Downloads/dogovor_arendy_scan.pdf",
+        ])
+        let states: [(String, PetAssistant.Phase, String)] = [
+            ("input", .input, ""),
+            ("thinking", .thinking, "разложи скриншоты с рабочего стола"),
+            ("plan", .plan(tidy, issues: []), "разложи скриншоты"),
+            ("plan-issues", .plan(tidy, issues: [PetIssue(index: 4, message: "файла нет")]), "разложи скриншоты"),
+            ("found", .plan(found, issues: []), "где договор аренды"),
+            ("done", .done("Готово: 5 действий", canUndo: true), ""),
+            ("playing", .playing("Weird Fishes/Arpeggi — Radiohead"), ""),
+            ("login", .notLoggedIn, ""),
+        ]
+        let size = NSSize(width: PetPanelController.contentWidth + 20 + 48, height: 420)
+        let sources = [
+            PetMusicSource(uri: "spotify:user:me:collection", name: "Любимые треки", kind: .liked, subtitle: "Медиатека"),
+            PetMusicSource(uri: "spotify:playlist:1", name: "Для бега", kind: .playlist, subtitle: "Плейлист · ivan"),
+            PetMusicSource(uri: "spotify:playlist:2", name: "Deep Focus", kind: .playlist, subtitle: "Плейлист · Spotify"),
+            PetMusicSource(uri: "spotify:playlist:3", name: "Дорога", kind: .playlist, subtitle: "Плейлист · ivan"),
+            PetMusicSource(uri: "spotify:album:4", name: "In Rainbows", kind: .album, subtitle: "Альбом · Radiohead"),
+        ]
+        var tagged = PetContext()
+        tagged.music = sources[1]
+        let extra: [(String, PetAssistant.Phase, String)] = [("quick", .input, ""), ("mention", .input, "@д"), ("tagged", .input, "")]
+        for (name, phase, asked) in states + extra {
+            assistant.debugShow(phase, asked: asked, context: name == "input" ? context : name == "tagged" ? tagged : PetContext(),
+                                sources: name == "quick" || name == "mention" || name == "tagged" ? sources : [],
+                                query: name == "mention" ? "что-нибудь бодрое @д" : "")
+            let window = NSWindow(contentRect: NSRect(origin: CGPoint(x: 40, y: 40), size: size),
+                                  styleMask: .borderless, backing: .buffered, defer: false)
+            window.backgroundColor = NSColor(white: 0.55, alpha: 1)
+            let host = NSHostingView(rootView: PetPanelView(assistant: assistant, state: state, close: {}, heightChanged: { _ in }))
+            host.frame = NSRect(origin: .zero, size: size)
+            window.contentView = host
+            window.orderFrontRegardless()
+            RunLoop.main.run(until: Date().addingTimeInterval(0.6))
+            guard let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) else { continue }
+            host.cacheDisplay(in: host.bounds, to: rep)
+            try? rep.representation(using: .png, properties: [:])?.write(to: dir.appendingPathComponent("pet-\(name).png"))
+            window.orderOut(nil)
+        }
+        exit(0)
+    }
+}
+
+/// Debug aid: `NotchIsland --pet-ask "<request>"` runs the pet's Claude brain cold and pre-warmed
+/// and prints both timings and the plan (no files are touched, nothing is played).
+@MainActor
+enum PetAskBench {
+    static func runIfRequested() {
+        let args = CommandLine.arguments
+        guard let i = args.firstIndex(of: "--pet-ask"), i + 1 < args.count else { return }
+        let request = args[i + 1]
+        if let quick = PetQuickIntent.parse(request) { print("quick path: \(quick)") }
+        let brain = ClaudeCodeBrain()
+        Task {
+            var t = Date()
+            let cold = try? await brain.plan(request, context: PetContext())
+            print(String(format: "cold: %.2f s → %@", Date().timeIntervalSince(t), String(describing: cold)))
+            brain.prewarm()
+            try? await Task.sleep(for: .seconds(4))
+            t = Date()
+            let warm = try? await brain.plan(request, context: PetContext())
+            print(String(format: "warm: %.2f s → %@", Date().timeIntervalSince(t), String(describing: warm)))
+            exit(0)
+        }
+        RunLoop.main.run()
     }
 }

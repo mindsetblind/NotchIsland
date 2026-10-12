@@ -213,6 +213,101 @@ final class SpotifyWeb {
         return try JSONSerialization.jsonObject(with: data) as? [String: Any]
     }
 
+    // MARK: Search
+
+    struct SearchHit { let uri: String; let title: String; let subtitle: String }
+
+    /// Best match for a pet request ("Radiohead", "chill acoustic"…). `type`: track, artist, album, playlist.
+    func search(_ query: String, type: String) async throws -> SearchHit? {
+        var c = URLComponents(string: Self.api + "/search")!
+        c.queryItems = [.init(name: "q", value: query), .init(name: "type", value: type), .init(name: "limit", value: "5")]
+        guard let url = c.url, let json = try await get(url.absoluteString) else { return nil }
+        // Playlist results may contain nulls (removed playlists).
+        let items = ((json[type + "s"] as? [String: Any])?["items"] as? [Any] ?? []).compactMap { $0 as? [String: Any] }
+        guard let item = items.first, let uri = item["uri"] as? String else { return nil }
+        let artists = (item["artists"] as? [[String: Any]] ?? []).compactMap { $0["name"] as? String }.joined(separator: ", ")
+        let owner = (item["owner"] as? [String: Any])?["display_name"] as? String
+        return SearchHit(uri: uri, title: item["name"] as? String ?? query,
+                         subtitle: type == "playlist" ? (owner.map { "плейлист · \($0)" } ?? "плейлист") : artists)
+    }
+
+    /// "включи <name>" without saying what it is: one search over artists, albums, playlists and
+    /// tracks. An exact artist/album/playlist name wins; otherwise the top track.
+    func searchBest(_ query: String) async throws -> SearchHit? {
+        var c = URLComponents(string: Self.api + "/search")!
+        c.queryItems = [.init(name: "q", value: query), .init(name: "type", value: "artist,album,playlist,track"),
+                        .init(name: "limit", value: "5")]
+        guard let url = c.url, let json = try await get(url.absoluteString) else { return nil }
+        func items(_ type: String) -> [[String: Any]] {
+            ((json[type + "s"] as? [String: Any])?["items"] as? [Any] ?? []).compactMap { $0 as? [String: Any] }
+        }
+        let wanted = Self.normalized(query)
+        for type in ["artist", "album", "playlist"] {
+            if let item = items(type).first(where: { Self.normalized($0["name"] as? String ?? "") == wanted }) {
+                return Self.hit(item, type: type, fallback: query)
+            }
+        }
+        if let track = items("track").first { return Self.hit(track, type: "track", fallback: query) }
+        return items("artist").first.map { Self.hit($0, type: "artist", fallback: query) }
+    }
+
+    static func normalized(_ s: String) -> String {
+        s.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil)
+            .trimmingCharacters(in: .whitespacesAndNewlines.union(.punctuationCharacters))
+    }
+
+    private static func hit(_ item: [String: Any], type: String, fallback: String) -> SearchHit {
+        let artists = (item["artists"] as? [[String: Any]] ?? []).compactMap { $0["name"] as? String }.joined(separator: ", ")
+        let owner = (item["owner"] as? [String: Any])?["display_name"] as? String
+        let subtitle: String
+        switch type {
+        case "playlist": subtitle = owner.map { "плейлист · \($0)" } ?? "плейлист"
+        case "artist": subtitle = ""
+        default: subtitle = artists
+        }
+        return SearchHit(uri: item["uri"] as? String ?? "", title: item["name"] as? String ?? fallback, subtitle: subtitle)
+    }
+
+    // MARK: Library (pet's @-tags)
+
+    /// Liked Songs, your playlists (own and followed) and saved albums — what the pet offers as "@" tags.
+    func librarySources() async throws -> [PetMusicSource] {
+        var out: [PetMusicSource] = []
+        if let me = try await get("/me"), let id = me["id"] as? String {
+            out.append(PetMusicSource(uri: "spotify:user:\(id):collection", name: "Любимые треки", kind: .liked, subtitle: "Медиатека"))
+        }
+        var page = try await get("/me/playlists?limit=50")
+        if let total = page?["total"] { debugLog("pet: /me/playlists total=\(total)") }
+        while let p = page, out.count < 500 {
+            for item in (p["items"] as? [Any] ?? []).compactMap({ $0 as? [String: Any] }) {
+                guard let uri = item["uri"] as? String, let name = item["name"] as? String else { continue }
+                let owner = (item["owner"] as? [String: Any])?["display_name"] as? String
+                out.append(PetMusicSource(uri: uri, name: name, kind: .playlist, subtitle: owner.map { "Плейлист · \($0)" } ?? "Плейлист"))
+            }
+            guard let next = p["next"] as? String else { break }
+            page = try await get(next)
+        }
+        if let albums = try? await get("/me/albums?limit=50") {
+            for item in (albums["items"] as? [[String: Any]] ?? []) {
+                guard let a = item["album"] as? [String: Any], let uri = a["uri"] as? String,
+                      let name = a["name"] as? String else { continue }
+                let artists = (a["artists"] as? [[String: Any]] ?? []).compactMap { $0["name"] as? String }.joined(separator: ", ")
+                out.append(PetMusicSource(uri: uri, name: name, kind: .album, subtitle: "Альбом · \(artists)"))
+            }
+        }
+        return out
+    }
+
+    /// Tracks of a tag, so the pet can pick "something upbeat from @Running".
+    func tracks(of source: PetMusicSource) async throws -> [PlaylistTrack] {
+        let id = source.uri.split(separator: ":").last.map(String.init) ?? ""
+        switch source.kind {
+        case .liked: return try await collect(firstPage: get("/me/tracks?limit=50"), fallbackImage: nil)
+        case .playlist: return try await playlist(id: id, uri: source.uri).tracks
+        case .album: return try await album(id: id, uri: source.uri).tracks
+        }
+    }
+
     // MARK: Playback control
 
     /// Starts `trackURI` inside `contextURI` (playlist/album) in the background, without touching the Spotify window.
@@ -225,6 +320,14 @@ final class SpotifyWeb {
         let query = device.map { "?device_id=\($0)" } ?? ""
         debugLog("play: track=\(trackURI) context=\(contextURI ?? "-") device=\(device ?? "-")")
         try await send("PUT", "/me/player/play" + query, body: body)
+    }
+
+    /// Starts a whole playlist / album / artist / Liked Songs on this Mac, in the background.
+    func play(contextURI: String) async throws {
+        let device = try? await thisComputerDeviceID()
+        let query = device.map { "?device_id=\($0)" } ?? ""
+        debugLog("play: context=\(contextURI) device=\(device ?? "-")")
+        try await send("PUT", "/me/player/play" + query, body: ["context_uri": contextURI])
     }
 
     private func thisComputerDeviceID() async throws -> String? {

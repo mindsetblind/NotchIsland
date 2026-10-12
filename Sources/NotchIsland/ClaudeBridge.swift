@@ -32,7 +32,7 @@ struct PermissionAsk: Identifiable, Equatable {
 struct AgentPeek: Equatable {
     let project: String
     let text: String
-    let mood: MascotMood
+    let mood: PetMood
 }
 
 /// Live state of Claude Code sessions, fed by `notchisland-hook` through a Unix socket.
@@ -49,7 +49,7 @@ final class ClaudeMonitor: ObservableObject {
     var isAnyWaiting: Bool { !permissions.isEmpty || sessions.contains { $0.status == .waiting } }
 
     /// The face to show for the agents overall.
-    var mood: MascotMood {
+    var mood: PetMood {
         if isAnyWaiting { return .attention }
         if isAnyWorking { return .working }
         if sessions.contains(where: { $0.status == .done }) { return .happy }

@@ -13,7 +13,7 @@ struct PermissionCardView: View {
         VStack(spacing: 0) {
             EarsLayout(notchWidth: model.notchSize.width, height: model.notchSize.height) {
                 HStack(spacing: 8) {
-                    MascotFace(mood: .attention, size: 15)
+                    PetFace(mood: .attention, size: 15)
                     Text(ask.project).font(.system(size: 12, weight: .semibold)).lineLimit(1)
                 }
                 .padding(.leading, IslandModel.inset - 4)
@@ -90,8 +90,8 @@ struct AgentCompactView: View {
     @ObservedObject var claude: ClaudeMonitor
 
     var body: some View {
-        if model.showsMascot {
-            // The mascot always lives on the right; the left shows what's going on.
+        if model.showsPet {
+            // The pet always lives on the right; the left shows what's going on.
             EarsLayout(notchWidth: model.notchSize.width, height: model.notchSize.height) {
                 if model.nowPlaying?.isPlaying == true {
                     ArtworkView(image: model.artwork, size: 22, corner: 6)
@@ -99,11 +99,11 @@ struct AgentCompactView: View {
                     AgentStatusGlyph(mood: claude.mood)
                 }
             } right: {
-                MascotView(mood: model.mascotMood, size: 17, gaze: model.mascotGaze)
+                PetView(mood: model.petMood, size: 17, gaze: model.petGaze)
             }
         } else {
             EarsLayout(notchWidth: model.notchSize.width, height: model.notchSize.height) {
-                MascotFace(mood: claude.mood, size: 17)
+                PetFace(mood: claude.mood, size: 17)
             } right: {
                 if model.nowPlaying?.isPlaying == true {
                     EqualizerView(isPlaying: true, tint: .white).frame(width: 22, height: 17)
@@ -116,7 +116,7 @@ struct AgentCompactView: View {
 }
 
 struct AgentStatusGlyph: View {
-    let mood: MascotMood
+    let mood: PetMood
 
     var body: some View {
         switch mood {
@@ -162,7 +162,7 @@ struct AgentPeekView: View {
     var body: some View {
         EarsLayout(notchWidth: model.notchSize.width, height: model.notchSize.height) {
             HStack(spacing: 8) {
-                MascotFace(mood: peek.mood, size: 16)
+                PetFace(mood: peek.mood, size: 16)
                 Text(peek.project).font(.system(size: 12, weight: .semibold)).lineLimit(1)
             }
             .padding(.leading, 12)
@@ -344,10 +344,10 @@ struct AgentsTab: View {
         .onAppear { installed = ClaudeHooks.isInstalled }
     }
 
-    private func faceTile(_ mood: MascotMood) -> some View {
+    private func faceTile(_ mood: PetMood) -> some View {
         RoundedRectangle(cornerRadius: 14, style: .continuous).fill(.white.opacity(0.08))
             .frame(width: IslandModel.artworkSize, height: IslandModel.artworkSize)
-            .overlay(MascotFace(mood: mood, size: 34))
+            .overlay(PetFace(mood: mood, size: 34))
     }
 }
 
@@ -356,7 +356,7 @@ private struct SessionRow: View {
     let session: ClaudeSession
     @State private var hover = false
 
-    private var mood: MascotMood {
+    private var mood: PetMood {
         switch session.status {
         case .working: return .working
         case .waiting: return .attention
@@ -367,7 +367,7 @@ private struct SessionRow: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            MascotFace(mood: mood, size: 12).frame(width: 22)
+            PetFace(mood: mood, size: 12).frame(width: 22)
             VStack(alignment: .leading, spacing: 1) {
                 Text(session.project).font(.system(size: 12, weight: .semibold)).lineLimit(1)
                 Text(session.activity).font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
