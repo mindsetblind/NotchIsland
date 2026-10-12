@@ -307,10 +307,44 @@ final class PetAssistant: ObservableObject {
     @Published var suggestionIndex = 0
     private var lastUndo: [PetUndo] = []
 
+    let voice = PetVoice()
+    private var voiceObserver: Any?
+
     init(brain: PetBrain? = nil) {
         let claude = ClaudeCodeBrain()
         claude.model = { AppSettings.shared.petModel }
         self.brain = brain ?? claude
+        voice.onText = { [weak self] text in self?.query = text }
+        voiceObserver = voice.objectWillChange.sink { [weak self] in self?.objectWillChange.send() }
+    }
+
+    // MARK: Voice
+
+    var isListening: Bool { voice.isListening }
+
+    func startListening() {
+        guard !voice.isListening else { return }
+        if case .thinking = phase { cancelThinking() }
+        if phase != .input { reset() }
+        query = ""
+        Task {
+            do { try await voice.start() } catch { phase = .failed(error.localizedDescription) }
+        }
+    }
+
+    /// Key released / mic button: what was said becomes the request.
+    func stopListening(submit: Bool = true) {
+        guard voice.isListening else { return }
+        Task {
+            let text = await voice.stop().trimmingCharacters(in: .whitespacesAndNewlines)
+            query = text
+            if submit && !text.isEmpty { self.submit() }
+        }
+    }
+
+    func cancelListening() {
+        voice.cancel()
+        query = ""
     }
 
     // MARK: Opening
@@ -325,6 +359,7 @@ final class PetAssistant: ObservableObject {
         onOpenChange?(open)
         releaseWork?.cancel()
         guard open else {
+            if voice.isListening { voice.cancel() }
             // Keep the warm Claude for a quick second call; let it go after two quiet minutes.
             let work = DispatchWorkItem { [brain] in brain.release() }
             releaseWork = work
@@ -600,6 +635,7 @@ final class PetAssistant: ObservableObject {
 
     /// The face in the panel.
     var mood: PetMood {
+        if voice.isListening { return .attention }
         switch phase {
         case .input: return .idle
         case .thinking: return .working

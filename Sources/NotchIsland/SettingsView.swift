@@ -87,6 +87,12 @@ struct PeekSettings: View {
             }
             Section("Pet-помощник") {
                 Toggle("Вызывать по ⌥⇧Space", isOn: $settings.petHotKeyEnabled)
+                Toggle("Голос: удерживай ⌥⇧Space и говори", isOn: $settings.petVoice)
+                Toggle("Сам предлагает помощь", isOn: $settings.petSuggestions)
+                if settings.petSuggestions {
+                    Text("Изредка (не чаще раза в 3 часа) смотрит на Загрузки и Рабочий стол и предлагает в острове разобрать завалы. Ничего не делает без твоего подтверждения.")
+                        .font(.callout).foregroundStyle(.secondary)
+                }
                 Picker("Модель", selection: $settings.petModel) {
                     Text("Sonnet — точнее").tag("sonnet")
                     Text("Haiku — быстрее").tag("haiku")

@@ -101,12 +101,18 @@ final class PetPanelController {
                                     self.resize(height: h + Self.margin, on: screen)
                                 })
         panel.contentView = NSHostingView(rootView: view)
-        panel.onResignKey = { [weak self] in self?.close() }
+        panel.onResignKey = { [weak self] in
+            guard let self else { return }
+            // The first time, macOS asks for the microphone: its dialog takes focus — stay open.
+            if self.assistant.voice.askingPermission { return }
+            self.close()
+        }
         panel.onEscape = { [weak self] in self?.escape() }
         return panel
     }
 
     func escape() {
+        if assistant.isListening { return assistant.cancelListening() }
         // Like Spotlight: esc first clears what's there, then closes.
         switch assistant.phase {
         case .thinking: assistant.cancelThinking()
@@ -212,7 +218,10 @@ struct PetPanelView: View {
                 .onChange(of: assistant.query) { _, _ in assistant.suggestionIndex = 0 }
                 .disabled(assistant.phase == .thinking)
                 .accessibilityLabel("Запрос для pet")
-            if assistant.phase != .input && assistant.phase != .thinking {
+            if settings.petVoice && assistant.phase != .thinking {
+                micButton
+            }
+            if assistant.phase != .input && assistant.phase != .thinking && !assistant.isListening {
                 Button { assistant.reset() } label: {
                     Image(systemName: "xmark.circle.fill").font(.system(size: 14))
                 }
@@ -225,6 +234,28 @@ struct PetPanelView: View {
         .frame(height: 30)
     }
 
+    /// Click to talk (same as holding ⌥⇧Space); while listening it shows the voice level.
+    private var micButton: some View {
+        Button {
+            assistant.isListening ? assistant.stopListening() : assistant.startListening()
+        } label: {
+            Group {
+                if assistant.isListening {
+                    Image(systemName: "waveform", variableValue: assistant.voice.level)
+                        .foregroundStyle(.white)
+                } else {
+                    Image(systemName: "mic.fill").foregroundStyle(.white.opacity(0.35))
+                }
+            }
+            .font(.system(size: 14, weight: .medium))
+            .frame(width: 22, height: 22)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(assistant.isListening ? "Закончить и отправить" : "Сказать голосом (или держи ⌥⇧Space)")
+        .accessibilityLabel(assistant.isListening ? "Закончить и отправить" : "Сказать голосом")
+    }
+
     /// Arrow keys and Tab belong to the "@" list while it's showing.
     private func suggest(_ action: () -> Void) -> KeyPress.Result {
         guard !assistant.suggestions.isEmpty else { return .ignored }
@@ -233,6 +264,7 @@ struct PetPanelView: View {
     }
 
     private var placeholder: String {
+        if assistant.isListening { return "Слушаю…" }
         if assistant.context.music != nil && assistant.phase == .input {
             return "⏎ — включить, или скажи, что выбрать"
         }
@@ -466,6 +498,9 @@ struct PetPanelView: View {
             switch assistant.phase {
             case .thinking:
                 hint("esc — отменить")
+            case _ where assistant.isListening:
+                hint("Отпусти ⌥⇧Space — и я сделаю · esc — отменить")
+                Spacer()
             case .input where !assistant.suggestions.isEmpty:
                 hint("↑↓ — выбрать · ⏎ или tab — прикрепить")
                 Spacer()

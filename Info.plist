@@ -15,6 +15,8 @@
     <key>NSBluetoothAlwaysUsageDescription</key><string>NotchIsland показывает, когда подключаются AirPods и другие Bluetooth-устройства.</string>
     <key>NSCalendarsFullAccessUsageDescription</key><string>NotchIsland напоминает о ближайших событиях у выреза. События читаются только на этом Mac.</string>
     <key>NSCalendarsUsageDescription</key><string>NotchIsland напоминает о ближайших событиях у выреза. События читаются только на этом Mac.</string>
+    <key>NSMicrophoneUsageDescription</key><string>Pet слушает, пока ты держишь ⌥⇧Space, и превращает речь в запрос. Звук никуда не отправляется.</string>
+    <key>NSSpeechRecognitionUsageDescription</key><string>Речь распознаётся прямо на этом Mac, чтобы pet понял, что ты сказал.</string>
     <key>NSAppleEventsUsageDescription</key><string>NotchIsland показывает текущий трек и управляет воспроизведением в Музыке и Spotify, а pet узнаёт, какая папка открыта в Finder.</string>
 </dict>
 </plist>

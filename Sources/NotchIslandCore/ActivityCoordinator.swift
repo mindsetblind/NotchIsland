@@ -7,6 +7,8 @@ public enum ActivityKind: String, CaseIterable, Codable, Sendable {
     case pomodoro, agent, developer, music
     // Short alerts.
     case battery, device, color, clipboard, download, calendar, disk
+    /// The pet offering help on its own (tidy Downloads…).
+    case pet
 
     /// Default order, highest first. Live activities can be re-ordered by the user (Settings).
     public var defaultPriority: Int {
@@ -19,6 +21,7 @@ public enum ActivityKind: String, CaseIterable, Codable, Sendable {
         case .device: return 50
         case .disk: return 45
         case .download: return 40
+        case .pet: return 35
         case .color, .clipboard: return 30
         case .music: return 10
         }

@@ -351,6 +351,7 @@ final class IslandModel: ObservableObject {
         startEventServer()
         loadShelf()
         loadApps()
+        PetProactive.shared.start(model: self)
         devices.onEvent = { [weak self] event in self?.showDevicePeek(event) }
         devices.start()
         refreshMedia()
@@ -456,6 +457,14 @@ final class IslandModel: ObservableObject {
     /// Click on the collapsed island. While an alert is shown, open the tab it belongs to
     /// (like tapping a live activity on iPhone); otherwise keep the tab the user left.
     func openFromClick() {
+        // The pet's own offer: open the pet with the request instead of the island.
+        if let alert = activities.shownAlert, case .notice(let n) = alert.payload, let request = n.petRequest {
+            withAnimation(Self.spring) { activities.dismiss(alert.id) }
+            setHoverHint(false)
+            PetPanelController.shared.open()
+            petAssistant.ask(request)
+            return
+        }
         if let alert = activities.shownAlert, let tab = Self.tab(for: alert.payload) { selectTab(tab) }
         setHovering(true)
     }

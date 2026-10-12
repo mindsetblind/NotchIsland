@@ -60,6 +60,8 @@ struct Notice: Equatable {
     var spinning = false
     /// Tab to open when the island is clicked while this is shown.
     var tab: IslandTab?
+    /// The pet's offer: a click opens the pet with this request (and its face replaces the symbol).
+    var petRequest: String?
 }
 
 typealias IslandActivities = ActivityCoordinator<IslandActivity>
@@ -86,6 +88,8 @@ struct NoticeView: View {
             HStack(spacing: 7) {
                 if notice.spinning {
                     SpinnerView(color: notice.tint.color).frame(width: 14, height: 14)
+                } else if notice.petRequest != nil {
+                    PetView(mood: .attention, size: 14)
                 } else {
                     Image(systemName: notice.symbol)
                         .font(.system(size: 13, weight: .semibold))

@@ -43,6 +43,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// ⌥⇧Space: the pet climbs out of the notch to help with files.
     private var petKey: HotKey?
     private var petKeyObserver: Any?
+    /// Push-to-talk: held longer than this → the pet listens; a quick tap opens/closes it.
+    private var petHold: DispatchWorkItem?
+    private var petTalking = false
+    private var petKeyDown = false
     /// Space = play/pause, but only while the island is open on the Music tab.
     private var spaceKey: HotKey?
     private var stateObserver: Any?
@@ -125,11 +129,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             MainActor.assumeIsolated {
                 guard let self else { return }
                 self.petKey = enabled
-                    ? HotKey(keyCode: kVK_Space, modifiers: optionKey | shiftKey) { [weak self] in
-                        MainActor.assumeIsolated {
-                            self?.model.setHovering(false)
-                            PetPanelController.shared.toggle()
-                        }
+                    ? HotKey(keyCode: kVK_Space, modifiers: optionKey | shiftKey,
+                             onRelease: { [weak self] in MainActor.assumeIsolated { self?.petKeyReleased() } }) { [weak self] in
+                        MainActor.assumeIsolated { self?.petKeyPressed() }
                     }
                     : nil
             }
@@ -219,6 +221,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     self?.trackMouse()
                 }
             }
+        }
+    }
+
+    // MARK: Pet hot key
+
+    private func petKeyPressed() {
+        guard !petKeyDown else { return }   // key repeat
+        petKeyDown = true
+        model.setHovering(false)
+        guard AppSettings.shared.petVoice else { return PetPanelController.shared.toggle() }
+        let work = DispatchWorkItem { [weak self] in
+            guard let self, self.petKeyDown else { return }
+            self.petTalking = true
+            if !PetPanelController.shared.isOpen { PetPanelController.shared.open() }
+            PetAssistant.shared.startListening()
+        }
+        petHold = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35, execute: work)
+    }
+
+    private func petKeyReleased() {
+        petKeyDown = false
+        petHold?.cancel()
+        guard AppSettings.shared.petVoice else { return }
+        if petTalking {
+            petTalking = false
+            PetAssistant.shared.stopListening()
+        } else {
+            PetPanelController.shared.toggle()
         }
     }
 

@@ -28,6 +28,10 @@ final class AppSettings: ObservableObject {
     @Published var petHotKeyEnabled: Bool { didSet { save(petHotKeyEnabled, "petHotKeyEnabled") } }
     /// Claude model the pet thinks with: "sonnet" (smarter) or "haiku" (faster).
     @Published var petModel: String { didSet { save(petModel, "petModel") } }
+    /// The pet now and then offers help on its own (tidy Downloads, screenshots…).
+    @Published var petSuggestions: Bool { didSet { save(petSuggestions, "petSuggestions") } }
+    /// Hold ⌥⇧Space to talk to the pet.
+    @Published var petVoice: Bool { didSet { save(petVoice, "petVoice") } }
     /// Alert/activity kinds switched off by the user (empty = everything on; new kinds start enabled).
     @Published var disabledActivities: Set<ActivityKind> {
         didSet { save(disabledActivities.map(\.rawValue).sorted(), "disabledActivities") }
@@ -74,6 +78,8 @@ final class AppSettings: ObservableObject {
         petSleepsAtNight = bool("mascotSleepsAtNight", true)
         petHotKeyEnabled = bool("petHotKeyEnabled", true)
         petModel = d.string(forKey: "petModel") ?? "sonnet"
+        petSuggestions = bool("petSuggestions", true)
+        petVoice = bool("petVoice", true)
         clipboardEnabled = bool("clipboardEnabled", false)
         clipboardPaused = bool("clipboardPaused", false)
         clipboardMaxItems = d.object(forKey: "clipboardMaxItems") as? Int ?? 50
