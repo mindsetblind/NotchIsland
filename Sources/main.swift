@@ -35,6 +35,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var dragWatch: Timer?
     private var hotKey: HotKey?
     private var hotKeyObserver: Any?
+    /// Space = play/pause, but only while the island is open on the Music tab.
+    private var spaceKey: HotKey?
+    private var stateObserver: Any?
     private var enteredAt: Date?
     private var leftAt: Date?
 
@@ -85,6 +88,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return event
         }
         model.onDragOutEnded = { [weak self] in self?.trackMouse() }
+        stateObserver = model.objectWillChange.sink { [weak self] in
+            DispatchQueue.main.async { self?.updateSpaceKey() }
+        }
         model.start()
         LoginItem.applyOnLaunch()
     }
@@ -134,6 +140,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    /// Registered only while it's needed, so everywhere else Space keeps working as usual.
+    private func updateSpaceKey() {
+        let wanted = model.isExpanded && model.selectedTab == .music && model.nowPlaying != nil
+        guard wanted != (spaceKey != nil) else { return }
+        spaceKey = wanted
+            ? HotKey(keyCode: kVK_Space, modifiers: 0) { [weak self] in self?.model.perform(.playPause) }
+            : nil
+    }
+
+    /// The mascot follows the cursor with its eyes when it's near the top of the screen.
+    private func updateMascotGaze(mouse: NSPoint, screen: NSScreen) {
+        guard model.showsMascot, !model.isExpanded else { return model.setMascotGaze(nil) }
+        // The face sits in the middle of the right ear, whose width depends on the current state.
+        let half = model.size(for: model.state).width / 2
+        let earStart = model.notchSize.width / 2 + EarsLayout<EmptyView, EmptyView>.notchGap
+        let faceX = screen.frame.midX + (earStart + half) / 2
+        let fromTop = screen.frame.maxY - mouse.y
+        guard fromTop < 260 else { return model.setMascotGaze(nil) }
+        let raw = max(-1, min(1, (mouse.x - faceX) / 220))
+        model.setMascotGaze((raw * 4).rounded() / 4)   // quarter steps: no re-render on every pixel
+    }
+
     private func islandRect(padding pad: CGFloat) -> CGRect {
         guard let screen = targetScreen else { return .zero }
         let size = model.islandSize
@@ -146,6 +174,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func trackMouse() {
         guard let screen = targetScreen else { return }
         let mouse = NSEvent.mouseLocation
+        updateMascotGaze(mouse: mouse, screen: screen)
 
         if model.fileDragActive {
             // Generous zone around the notch so the drop target opens before you hit it exactly.
@@ -196,6 +225,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 MainActor.assumeIsolated {
     Snapshots.runIfRequested()
     AnimationCapture.runIfRequested()
+    MascotCapture.runIfRequested()
 }
 
 let app = NSApplication.shared

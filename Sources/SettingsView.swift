@@ -12,7 +12,7 @@ final class SettingsWindow {
             w.title = "Настройки NotchIsland"
             w.styleMask = [.titled, .closable, .miniaturizable]
             w.isReleasedWhenClosed = false
-            w.setContentSize(NSSize(width: 560, height: 440))
+            w.setContentSize(NSSize(width: 620, height: 440))
             w.center()
             window = w
         }
@@ -29,10 +29,11 @@ struct SettingsView: View {
             GeneralSettings().tabItem { Label("Основные", systemImage: "gearshape") }
             PeekSettings().tabItem { Label("Уведомления", systemImage: "bell.badge") }
             MusicSettings(model: model).tabItem { Label("Музыка", systemImage: "music.note") }
+            ClaudeSettings().tabItem { Label("Claude Code", systemImage: "eyes") }
             ToolSettings(model: model).tabItem { Label("Инструменты", systemImage: "wrench.and.screwdriver") }
             AboutSettings().tabItem { Label("О программе", systemImage: "info.circle") }
         }
-        .frame(width: 560, height: 440)
+        .frame(width: 620, height: 440)
     }
 }
 
@@ -72,6 +73,13 @@ private struct PeekSettings: View {
             Section("Пока остров свёрнут") {
                 Toggle("Обложка и эквалайзер, когда играет музыка", isOn: $settings.showCompactMusic)
                 Toggle("Таймер помидора", isOn: $settings.showCompactPomodoro)
+            }
+            Section("Маскот") {
+                Toggle("Всегда виден справа от выреза", isOn: $settings.mascotAlwaysVisible)
+                Toggle("Засыпает ночью (с 1 до 6)", isOn: $settings.mascotSleepsAtNight)
+                    .disabled(!settings.mascotAlwaysVisible)
+                Text("Следит за курсором, танцует под музыку, «думает», пока работает Claude Code, зовёт, когда он ждёт ответа, и засыпает, если долго не трогать Mac.")
+                    .font(.callout).foregroundStyle(.secondary)
             }
             Section("Короткие уведомления у выреза") {
                 Toggle("Подключение зарядки", isOn: $settings.showChargingPeek)
@@ -139,6 +147,43 @@ private struct MusicSettings: View {
         }
         .formStyle(.grouped)
         .onAppear { clientID = model.spotify.clientID ?? "" }
+    }
+}
+
+private struct ClaudeSettings: View {
+    @ObservedObject private var settings = AppSettings.shared
+    @State private var installed = ClaudeHooks.isInstalled
+
+    var body: some View {
+        Form {
+            Section {
+                HStack {
+                    if installed {
+                        Label("Подключено", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
+                        Spacer()
+                        Button("Отключить…") { ClaudeHooks.uninstall(); installed = ClaudeHooks.isInstalled }
+                    } else {
+                        Text("Не подключено").foregroundStyle(.secondary)
+                        Spacer()
+                        Button("Подключить…") { ClaudeHooks.install(); installed = ClaudeHooks.isInstalled }
+                    }
+                }
+            } header: {
+                Text("Claude Code")
+            } footer: {
+                Text("Добавляет хуки в \(ClaudeHooks.settingsURL.path) (с резервной копией). Остров показывает сессии и их действия, «готово» и «ждёт ответа». Если остров не запущен, Claude Code работает как обычно.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Section {
+                Toggle("Спрашивать разрешения в острове", isOn: $settings.claudePermissionsInIsland)
+                Toggle("Звуки (запрос разрешения, готово)", isOn: $settings.claudeSounds)
+            } footer: {
+                Text("Если выключить разрешения, Claude Code будет спрашивать их в терминале, а остров — только показывать статус.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        }
+        .formStyle(.grouped)
+        .onAppear { installed = ClaudeHooks.isInstalled }
     }
 }
 

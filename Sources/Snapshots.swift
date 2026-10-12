@@ -48,6 +48,10 @@ enum Snapshots {
             try? png.write(to: dir.appendingPathComponent(name + ".png"))
         }
 
+        model.claude.fillForSnapshots()
+        if let ask = model.claude.permissions.first {
+            save("permission", model.size(for: .permission), PermissionCardView(model: model, claude: model.claude, ask: ask))
+        }
         for tab in IslandTab.allCases {
             model.selectTab(tab)
             save("expanded-\(tab.rawValue)", model.size(for: .expanded), ExpandedView(model: model))
@@ -70,7 +74,11 @@ enum Snapshots {
             }
         }
         let sheet = VStack(alignment: .leading, spacing: 8) {
+            peek("mascot", .idle, MascotEarView(model: model))
             peek("music", .music, CompactMusicView(model: model))
+            peek("agent", .agent, AgentCompactView(model: model, claude: model.claude))
+            peek("agent done", .agentPeek, AgentPeekView(model: model, peek: AgentPeek(project: "NotchIsland", text: "готово", mood: .happy)))
+            peek("agent waits", .agentPeek, AgentPeekView(model: model, peek: AgentPeek(project: "Java practice", text: "ждёт ответа", mood: .attention)))
             peek("charging", .charging, ChargingPeekView(model: model))
             peek("color", .color, ColorPeekView(model: model, hex: "#3A7BD5"))
             peek("pomodoro done", .pomodoroPeek, PomodoroPeekView(model: model, peek:
@@ -194,6 +202,64 @@ enum AnimationCapture {
             try? png.write(to: dir.appendingPathComponent("collapse.png"))
         }
         print("\(frames.count) frames")
+        exit(0)
+    }
+}
+
+/// Debug aid: `NotchIsland --capture-mascot <dir>` renders the Core Animation mascot in every mood,
+/// a few moments apart, into one sheet.
+@MainActor
+enum MascotCapture {
+    static func runIfRequested() {
+        let args = CommandLine.arguments
+        guard let i = args.firstIndex(of: "--capture-mascot"), i + 1 < args.count else { return }
+        let dir = URL(fileURLWithPath: args[i + 1])
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        _ = NSApplication.shared
+        NSApp.setActivationPolicy(.accessory)
+
+        let moods: [MascotMood] = [.idle, .working, .attention, .happy, .sleeping, .dancing]
+        let cell = NSSize(width: 140, height: 110)
+        let window = NSWindow(contentRect: NSRect(x: 40, y: 40, width: cell.width * CGFloat(moods.count), height: cell.height),
+                              styleMask: .borderless, backing: .buffered, defer: false)
+        window.backgroundColor = .black
+        let views = moods.map { mood -> MascotNSView in
+            let v = MascotNSView(size: 64)
+            v.update(mood: mood, gaze: 0)
+            return v
+        }
+        let container = NSView(frame: NSRect(origin: .zero, size: window.frame.size))
+        container.wantsLayer = true
+        container.layer?.backgroundColor = NSColor.black.cgColor
+        for (n, v) in views.enumerated() {
+            v.frame = NSRect(x: CGFloat(n) * cell.width + 19, y: 14, width: 64 * 1.6, height: 64 * 1.3)
+            container.addSubview(v)
+        }
+        window.contentView = container
+        window.orderFrontRegardless()
+
+        var shots: [CGImage] = []
+        for _ in 0..<5 {
+            RunLoop.main.run(until: Date().addingTimeInterval(0.27))
+            let w = Int(container.bounds.width), h = Int(container.bounds.height)
+            let ctx = CGContext(data: nil, width: w, height: h, bitsPerComponent: 8, bytesPerRow: 0,
+                                space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+            container.layer?.presentation()?.render(in: ctx) ?? container.layer?.render(in: ctx)
+            if let img = ctx.makeImage() { shots.append(img) }
+        }
+        window.orderOut(nil)
+
+        let W = Int(window.frame.width), H = Int(window.frame.height)
+        let sheet = CGContext(data: nil, width: W, height: H * shots.count + 4 * shots.count, bitsPerComponent: 8, bytesPerRow: 0,
+                              space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+        sheet.setFillColor(NSColor.darkGray.cgColor)
+        sheet.fill(CGRect(x: 0, y: 0, width: W, height: H * shots.count + 4 * shots.count))
+        for (n, img) in shots.enumerated() {
+            sheet.draw(img, in: CGRect(x: 0, y: (shots.count - 1 - n) * (H + 4), width: W, height: H))
+        }
+        if let out = sheet.makeImage(), let png = NSBitmapImageRep(cgImage: out).representation(using: .png, properties: [:]) {
+            try? png.write(to: dir.appendingPathComponent("mascot.png"))
+        }
         exit(0)
     }
 }

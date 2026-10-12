@@ -13,16 +13,20 @@ enum IslandState: Equatable {
     case pomodoroPeek // phase finished
     case expanded    // hover
     case drop        // files are being dragged near the notch → AirDrop target
+    case permission  // Claude Code asks for permission: card with Allow / Deny
+    case agent       // an agent is working / waiting: mascot face around the notch
+    case agentPeek   // "готово" / "ждёт ответа"
 }
 
 enum IslandTab: String, CaseIterable, Identifiable {
-    case music, apps, shelf, tools
+    case music, apps, shelf, agents, tools
     var id: String { rawValue }
     var symbol: String {
         switch self {
         case .music: return "music.note"
         case .apps: return "square.grid.2x2.fill"
         case .shelf: return "tray.fill"
+        case .agents: return "eyes"
         case .tools: return "wrench.and.screwdriver.fill"
         }
     }
@@ -31,6 +35,7 @@ enum IslandTab: String, CaseIterable, Identifiable {
         case .music: return "Музыка"
         case .apps: return "Приложения"
         case .shelf: return "Полка"
+        case .agents: return "Агенты"
         case .tools: return "Инструменты"
         }
     }
@@ -82,6 +87,8 @@ final class IslandModel: ObservableObject {
 
     let media = MediaService()
     let pomodoro = Pomodoro()
+    let claude = ClaudeMonitor()
+    private var claudeObserver: Any?
     private var pomodoroObserver: Any?
     private var settingsObserver: Any?
     let settings = AppSettings.shared
@@ -91,6 +98,8 @@ final class IslandModel: ObservableObject {
     private var playlistTask: Task<Void, Never>?
     private var skipTask: Task<Void, Never>?
     private var mediaFetchInFlight = false
+    private var lastCommandAt = Date.distantPast
+    private var expectedPlaying: (value: Bool, until: Date)?
     private var lastListReloadKey: String?
     /// Track the queue-skipper is currently heading to (shown with a spinner in the list).
     @Published private(set) var skipTargetID: String?
@@ -101,6 +110,7 @@ final class IslandModel: ObservableObject {
         spotifyHasClientID = spotify.clientID != nil
         // Island state depends on the timer, so re-render whenever it changes.
         pomodoroObserver = pomodoro.objectWillChange.sink { [weak self] in self?.objectWillChange.send() }
+        claudeObserver = claude.objectWillChange.sink { [weak self] in self?.objectWillChange.send() }
         // Toggling what's shown around the notch must re-evaluate the island state right away.
         settingsObserver = settings.objectWillChange.sink { [weak self] in
             DispatchQueue.main.async { withAnimation(Self.spring) { self?.objectWillChange.send() } }
@@ -118,24 +128,26 @@ final class IslandModel: ObservableObject {
 
     var state: IslandState {
         if fileDragActive && dropNear { return .drop }
+        if !claude.permissions.isEmpty { return .permission }
         if hovering { return .expanded }
         if chargingPeek { return .charging }
+        if claude.peek != nil { return .agentPeek }
         if pomodoro.peek != nil { return .pomodoroPeek }
         if colorPeek != nil { return .color }
         if devicePeek != nil { return .device }
         if pomodoro.isRunning && settings.showCompactPomodoro { return .pomodoro }
+        if claude.isAnyWorking || claude.isAnyWaiting { return .agent }
         if nowPlaying?.isPlaying == true && settings.showCompactMusic { return .music }
         return .idle
     }
 
     var isExpanded: Bool { hovering }
-    var isLarge: Bool { state == .expanded || state == .drop }
+    var isLarge: Bool { state == .expanded || state == .drop || state == .permission }
 
     var islandSize: CGSize {
         var s = size(for: state)
         if hoverHint && state != .expanded {
-            s.width += 22
-            s.height += 6
+            s.width += 22   // sideways only: growing downward would cover full-screen windows
         }
         return s
     }
@@ -147,26 +159,88 @@ final class IslandModel: ObservableObject {
     static let contentBottom: CGFloat = 20
     static let playlistHeight: CGFloat = 230
 
+    /// Width of each "ear" when only the mascot is shown (it sits in the right one).
+    static let mascotEar: CGFloat = 40
+
     func size(for state: IslandState) -> CGSize {
         switch state {
-        case .idle:     return notchSize
-        case .music:    return CGSize(width: notchSize.width + 2 * 52, height: notchSize.height + 6)
+        case .idle:     return showsMascot ? CGSize(width: notchSize.width + 2 * Self.mascotEar, height: notchSize.height)
+                                           : notchSize
+        // Collapsed states never go below the menu bar (= notch height), so they can't cover
+        // the top of full-screen windows.
+        case .music:    return CGSize(width: notchSize.width + 2 * 52, height: notchSize.height)
         case .charging: return CGSize(width: notchSize.width + 2 * 92, height: notchSize.height)
         case .device:   return CGSize(width: notchSize.width + 2 * 150, height: notchSize.height)
         case .color:    return CGSize(width: notchSize.width + 2 * 140, height: notchSize.height)
-        case .pomodoro: return CGSize(width: notchSize.width + 2 * 58, height: notchSize.height)
+        case .pomodoro: return CGSize(width: notchSize.width + 2 * (showsMascot ? 84 : 58), height: notchSize.height)
         case .pomodoroPeek: return CGSize(width: notchSize.width + 2 * 160, height: notchSize.height)
         case .drop:     return CGSize(width: max(540, notchSize.width + 350), height: notchSize.height + 112)
+        case .permission: return CGSize(width: max(480, notchSize.width + 290), height: notchSize.height + 118)
+        case .agent:    return CGSize(width: notchSize.width + 2 * 52, height: notchSize.height)
+        case .agentPeek: return CGSize(width: notchSize.width + 2 * 140, height: notchSize.height)
         case .expanded: return CGSize(width: max(480, notchSize.width + 290),
                                      height: notchSize.height + Self.contentTop + Self.artworkSize + Self.contentBottom
                                         + (selectedTab == .music && showPlaylist ? Self.playlistHeight + Self.contentBottom : 0))
         }
     }
 
+    // MARK: - Mascot (always visible right of the notch)
+
+    /// Set from the mouse tracker: -1…1 = cursor left/right of the face; nil = too far to care.
+    @Published private(set) var mascotGaze: CGFloat?
+    private var happyUntil = Date.distantPast
+    private var lastMascotMood: MascotMood?
+
+    var showsMascot: Bool { settings.mascotAlwaysVisible }
+
+    var mascotMood: MascotMood {
+        if claude.isAnyWaiting { return .attention }
+        if claude.isAnyWorking { return .working }
+        // Only a short burst of joy: a finished Claude session stays "done" for minutes, and a face
+        // frozen in ^ ^ for that long stops blinking, dancing and sleeping.
+        if Date() < happyUntil { return .happy }
+        if isSleepy { return .sleeping }
+        if nowPlaying?.isPlaying == true { return .dancing }
+        return .idle
+    }
+
+    /// Nobody has touched the Mac for 5 minutes, or it's the middle of the night.
+    private var isSleepy: Bool {
+        let idle = CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: CGEventType(rawValue: ~0)!)
+        if idle > 5 * 60 { return true }
+        guard settings.mascotSleepsAtNight else { return false }
+        // At night it dozes off sooner — but not while you're actually using the Mac.
+        let hour = Calendar.current.component(.hour, from: Date())
+        return hour >= 1 && hour < 6 && idle > 60
+    }
+
+    func setMascotGaze(_ gaze: CGFloat?) {
+        // Any mouse movement wakes a sleeping mascot right away (not on the next periodic check).
+        if lastMascotMood == .sleeping { checkMascotMood() }
+        guard gaze != mascotGaze else { return }
+        mascotGaze = gaze
+    }
+
+    /// A short happy hop: file shelved, color copied, AirDrop sent…
+    func cheer() {
+        happyUntil = Date().addingTimeInterval(2.5)
+        objectWillChange.send()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.6) { [weak self] in self?.objectWillChange.send() }
+    }
+
+    /// Moods that change with time (sleep) don't trigger a re-render by themselves — check now and then.
+    private func checkMascotMood() {
+        let mood = mascotMood
+        guard mood != lastMascotMood else { return }
+        lastMascotMood = mood
+        objectWillChange.send()
+    }
+
     var topRadius: CGFloat { isLarge ? 14 : 6 }
     var bottomRadius: CGFloat { isLarge ? 30 : 12 }
 
     func start() {
+        claude.start()
         loadShelf()
         loadApps()
         devices.onEvent = { [weak self] event in self?.showDevicePeek(event) }
@@ -177,6 +251,9 @@ final class IslandModel: ObservableObject {
         })
         timers.append(Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
             self?.refreshBattery()
+        })
+        timers.append(Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in
+            self?.checkMascotMood()
         })
     }
 
@@ -224,16 +301,39 @@ final class IslandModel: ObservableObject {
     func refreshMedia() {
         guard !mediaFetchInFlight else { return }
         mediaFetchInFlight = true
+        let startedAt = Date()
         media.fetchAsync { [weak self] np in
-            self?.mediaFetchInFlight = false
-            self?.apply(np)
+            guard let self else { return }
+            self.mediaFetchInFlight = false
+            // A poll that started before the last command reports the old state — drop it, or the
+            // play/pause icon would briefly flip back. Poll again instead.
+            if startedAt < self.lastCommandAt {
+                self.refreshMedia()
+                return
+            }
+            self.apply(np)
         }
     }
 
     /// Snapshot mode needs the result right away.
     func refreshMediaNow() { apply(media.fetch()) }
 
-    private func apply(_ np: NowPlaying?) {
+    private func apply(_ polled: NowPlaying?) {
+        var np = polled
+        // Spotify keeps reporting "playing" for ~300 ms after a pause command. Within a short window
+        // after ⏯ we trust the state we just set; if the player still disagrees afterwards, it wins.
+        if let expected = expectedPlaying, var p = np, p.trackKey == nowPlaying?.trackKey {
+            if p.isPlaying == expected.value {
+                expectedPlaying = nil                       // confirmed
+            } else if Date() < expected.until {
+                p.isPlaying = expected.value                // late report — keep our state
+                p.position = nowPlaying?.position(at: Date()) ?? p.position
+                p.fetchedAt = Date()
+                np = p
+            } else {
+                expectedPlaying = nil                       // the command really didn't take
+            }
+        }
         if np != nowPlaying {
             withAnimation(Self.spring) { nowPlaying = np }
         }
@@ -261,8 +361,17 @@ final class IslandModel: ObservableObject {
     }
 
     func perform(_ command: MediaCommand) {
-        guard let source = nowPlaying?.source else { return }
-        media.send(command, to: source)
+        guard var np = nowPlaying else { return }
+        lastCommandAt = Date()
+        media.send(command, to: np.source)
+        if command == .playPause {
+            // Flip the icon right away; the next poll confirms it.
+            np.position = np.position(at: Date())
+            np.fetchedAt = Date()
+            np.isPlaying.toggle()
+            expectedPlaying = (np.isPlaying, Date().addingTimeInterval(1.0))
+            withAnimation(.easeOut(duration: 0.15)) { nowPlaying = np }
+        }
         // Ask again shortly so the UI reflects the new state without waiting a full second.
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in self?.refreshMedia() }
     }
@@ -444,6 +553,7 @@ final class IslandModel: ObservableObject {
               service.canPerform(withItems: urls) else { return }
         NSApp.activate(ignoringOtherApps: true)
         service.perform(withItems: urls)
+        cheer()
     }
 
     private static func loadFileURLs(_ providers: [NSItemProvider], completion: @escaping ([URL]) -> Void) {
@@ -471,7 +581,7 @@ final class IslandModel: ObservableObject {
             self.setFileDrag(false)
             let new = urls.filter { !self.shelf.contains($0) }
             withAnimation(Self.spring) { self.shelf.append(contentsOf: new) }
-            if !new.isEmpty { self.selectTab(.shelf) }
+            if !new.isEmpty { self.selectTab(.shelf); self.cheer() }
             self.saveShelf()
         }
     }
@@ -634,6 +744,7 @@ final class IslandModel: ObservableObject {
                              Int((rgb.greenComponent * 255).rounded()),
                              Int((rgb.blueComponent * 255).rounded()))
             self.copyColor(hex)
+            self.cheer()
             withAnimation(Self.spring) {
                 self.colorHistory.removeAll { $0 == hex }
                 self.colorHistory.insert(hex, at: 0)
@@ -674,6 +785,7 @@ final class IslandModel: ObservableObject {
 
     func toggleShuffle() {
         guard var np = nowPlaying else { return }
+        lastCommandAt = Date()
         np.isShuffling.toggle()
         media.setShuffle(np.isShuffling, for: np.source)
         withAnimation(.easeOut(duration: 0.15)) { nowPlaying = np }   // instant feedback

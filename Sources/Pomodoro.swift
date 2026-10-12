@@ -309,9 +309,14 @@ struct PomodoroCompactView: View {
                         .foregroundStyle(pomodoro.phase.color)
                 }
             } right: {
-                Text(formatTimer(pomodoro.remaining(at: ctx.date)))
-                    .font(.system(size: 12, weight: .semibold, design: .rounded).monospacedDigit())
-                    .foregroundStyle(pomodoro.phase.color)
+                HStack(spacing: 8) {
+                    Text(formatTimer(pomodoro.remaining(at: ctx.date)))
+                        .font(.system(size: 12, weight: .semibold, design: .rounded).monospacedDigit())
+                        .foregroundStyle(pomodoro.phase.color)
+                    if model.showsMascot {
+                        MascotView(mood: model.mascotMood, size: 16, gaze: model.mascotGaze)
+                    }
+                }
             }
         }
     }

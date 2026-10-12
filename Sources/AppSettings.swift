@@ -19,6 +19,10 @@ final class AppSettings: ObservableObject {
     @Published var showBluetoothPeek: Bool { didSet { save(showBluetoothPeek, "showBluetoothPeek") } }
     @Published var showDrivePeek: Bool { didSet { save(showDrivePeek, "showDrivePeek") } }
     @Published var cleaningDuration: TimeInterval { didSet { save(cleaningDuration, "cleaningDuration") } }
+    @Published var claudePermissionsInIsland: Bool { didSet { save(claudePermissionsInIsland, "claudePermissionsInIsland") } }
+    @Published var claudeSounds: Bool { didSet { save(claudeSounds, "claudeSounds") } }
+    @Published var mascotAlwaysVisible: Bool { didSet { save(mascotAlwaysVisible, "mascotAlwaysVisible") } }
+    @Published var mascotSleepsAtNight: Bool { didSet { save(mascotSleepsAtNight, "mascotSleepsAtNight") } }
     /// Picture shown instead of a cover that hasn't loaded (user's choice, else the bundled one).
     @Published private(set) var placeholderPicture: NSImage?
 
@@ -33,6 +37,10 @@ final class AppSettings: ObservableObject {
         showBluetoothPeek = bool("showBluetoothPeek", true)
         showDrivePeek = bool("showDrivePeek", true)
         cleaningDuration = d.object(forKey: "cleaningDuration") as? Double ?? 120
+        claudePermissionsInIsland = bool("claudePermissionsInIsland", true)
+        claudeSounds = bool("claudeSounds", true)
+        mascotAlwaysVisible = bool("mascotAlwaysVisible", true)
+        mascotSleepsAtNight = bool("mascotSleepsAtNight", true)
         placeholderPicture = Self.loadPlaceholder()
     }
 

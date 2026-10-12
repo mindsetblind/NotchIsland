@@ -89,7 +89,13 @@ struct IslandView: View {
     @ViewBuilder private var content: some View {
         switch model.state {
         case .idle:
-            Color.clear
+            if model.showsMascot {
+                MascotEarView(model: model)
+                    .frame(width: model.size(for: .idle).width, height: model.notchSize.height)
+                    .transition(.islandContent(scale: 0.8))
+            } else {
+                Color.clear
+            }
         case .music:
             CompactMusicView(model: model)
                 .frame(width: model.size(for: .music).width, height: model.size(for: .music).height)
@@ -118,6 +124,23 @@ struct IslandView: View {
             if let event = model.devicePeek {
                 DevicePeekView(model: model, event: event)
                     .frame(width: model.size(for: .device).width, height: model.notchSize.height)
+                    .transition(.islandContent(scale: 0.8))
+            }
+        case .permission:
+            if let ask = model.claude.permissions.first {
+                let s = model.size(for: .permission)
+                PermissionCardView(model: model, claude: model.claude, ask: ask)
+                    .frame(width: s.width, height: s.height, alignment: .top)
+                    .transition(.islandContent(scale: 0.92))
+            }
+        case .agent:
+            AgentCompactView(model: model, claude: model.claude)
+                .frame(width: model.size(for: .agent).width, height: model.notchSize.height)
+                .transition(.islandContent(scale: 0.8))
+        case .agentPeek:
+            if let peek = model.claude.peek {
+                AgentPeekView(model: model, peek: peek)
+                    .frame(width: model.size(for: .agentPeek).width, height: model.notchSize.height)
                     .transition(.islandContent(scale: 0.8))
             }
         case .drop:
@@ -194,8 +217,26 @@ struct CompactMusicView: View {
         EarsLayout(notchWidth: model.notchSize.width, height: model.size(for: .music).height) {
             ArtworkView(image: model.artwork, size: 26, corner: 7)
         } right: {
-            EqualizerView(isPlaying: model.nowPlaying?.isPlaying ?? false, tint: .white)
-                .frame(width: 22, height: 17)
+            if model.showsMascot {
+                // The mascot's eyes bounce like equalizer bars while music plays.
+                MascotView(mood: model.mascotMood, size: 17, gaze: model.mascotGaze)
+            } else {
+                EqualizerView(isPlaying: model.nowPlaying?.isPlaying ?? false, tint: .white)
+                    .frame(width: 22, height: 17)
+            }
+        }
+    }
+}
+
+/// Collapsed island with nothing else going on: just the mascot, right of the notch.
+struct MascotEarView: View {
+    @ObservedObject var model: IslandModel
+
+    var body: some View {
+        EarsLayout(notchWidth: model.notchSize.width, height: model.notchSize.height) {
+            Color.clear
+        } right: {
+            MascotView(mood: model.mascotMood, size: 17, gaze: model.mascotGaze)
         }
     }
 }
@@ -229,7 +270,7 @@ struct ExpandedView: View {
         VStack(spacing: 0) {
             EarsLayout(notchWidth: model.notchSize.width, height: model.notchSize.height) {
                 TabBar(model: model)
-                    .padding(.leading, IslandModel.inset - 6)
+                    .padding(.leading, IslandModel.inset - 10)
                     .frame(maxWidth: .infinity, alignment: .leading)
             } right: {
                 HStack(spacing: 0) {
@@ -248,6 +289,7 @@ struct ExpandedView: View {
                 case .music: MediaPanel(model: model).transition(.islandContent(scale: 0.97))
                 case .apps: AppsTab(model: model).transition(.islandContent(scale: 0.97))
                 case .shelf: ShelfTab(model: model).transition(.islandContent(scale: 0.97))
+                case .agents: AgentsTab(model: model, claude: model.claude).transition(.islandContent(scale: 0.97))
                 case .tools: ToolsTab(model: model).transition(.islandContent(scale: 0.97))
                 }
             }
@@ -272,14 +314,14 @@ struct TabBar: View {
     @Namespace private var ns
 
     var body: some View {
-        HStack(spacing: 2) {
+        HStack(spacing: 1) {
             ForEach(IslandTab.allCases) { tab in
                 let selected = model.selectedTab == tab
                 Button { model.selectTab(tab) } label: {
                     Image(systemName: tab.symbol)
                         .font(.system(size: 11, weight: .semibold))
                         .foregroundStyle(.white.opacity(selected ? 1 : 0.45))
-                        .frame(width: 28, height: 22)
+                        .frame(width: 24, height: 22)
                         .background {
                             if selected {
                                 Capsule().fill(.white.opacity(0.15))
