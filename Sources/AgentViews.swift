@@ -167,12 +167,68 @@ struct AgentPeekView: View {
             .padding(.leading, 12)
             .frame(maxWidth: .infinity, alignment: .leading)
         } right: {
-            Text(peek.text)
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(peek.mood == .happy ? Color.green : Color.orange)
-                .padding(.trailing, 14)
-                .frame(maxWidth: .infinity, alignment: .trailing)
+            Group {
+                if peek.mood == .happy {
+                    // Task finished: an animated check instead of the word "готово".
+                    AnimatedCheckmark(size: 20, animated: !Snapshots.active)
+                } else {
+                    Text(peek.text)
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(Color.orange)
+                }
+            }
+            .padding(.trailing, 14)
+            .frame(maxWidth: .infinity, alignment: .trailing)
         }
+    }
+}
+
+/// Hollow success check in the style of macOS Apple Pay: a thin ring draws itself clockwise from
+/// the top, then the check is drawn inside, then the whole mark settles with a small bounce.
+/// Uses the system accent color, like built-in macOS UI.
+struct AnimatedCheckmark: View {
+    var size: CGFloat = 20
+    var animated = true
+    @State private var ring: CGFloat = 0
+    @State private var check: CGFloat = 0
+    @State private var settle: CGFloat = 1
+
+    var body: some View {
+        let tint = Color(nsColor: .controlAccentColor)
+        let line = max(1.5, size * 0.085)
+        ZStack {
+            Circle()
+                .trim(from: 0, to: ring)
+                .stroke(tint, style: StrokeStyle(lineWidth: line, lineCap: .round))
+                .rotationEffect(.degrees(-90))
+            CheckShape()
+                .trim(from: 0, to: check)
+                .stroke(tint, style: StrokeStyle(lineWidth: line * 1.15, lineCap: .round, lineJoin: .round))
+                .frame(width: size * 0.44, height: size * 0.33)
+                .offset(y: size * 0.02)
+        }
+        .padding(line / 2)
+        .frame(width: size, height: size)
+        .scaleEffect(settle)
+        .onAppear {
+            guard animated else { ring = 1; check = 1; return }
+            withAnimation(.easeInOut(duration: 0.45)) { ring = 1 }
+            withAnimation(.easeOut(duration: 0.25).delay(0.38)) { check = 1 }
+            // A tiny "thump" when the check lands.
+            withAnimation(.easeOut(duration: 0.1).delay(0.6)) { settle = 1.12 }
+            withAnimation(.spring(duration: 0.35, bounce: 0.5).delay(0.7)) { settle = 1 }
+        }
+    }
+}
+
+/// ✓ drawn as one stroke: short leg down, long leg up.
+struct CheckShape: Shape {
+    func path(in r: CGRect) -> Path {
+        var p = Path()
+        p.move(to: CGPoint(x: r.minX, y: r.midY + r.height * 0.05))
+        p.addLine(to: CGPoint(x: r.minX + r.width * 0.36, y: r.maxY))
+        p.addLine(to: CGPoint(x: r.maxX, y: r.minY))
+        return p
     }
 }
 

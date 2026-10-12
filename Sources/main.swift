@@ -226,6 +226,7 @@ MainActor.assumeIsolated {
     Snapshots.runIfRequested()
     AnimationCapture.runIfRequested()
     MascotCapture.runIfRequested()
+    CheckCapture.runIfRequested()
 }
 
 let app = NSApplication.shared

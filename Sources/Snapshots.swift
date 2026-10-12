@@ -263,3 +263,44 @@ enum MascotCapture {
         exit(0)
     }
 }
+
+/// Debug aid: `NotchIsland --capture-check <dir>` records the "task done" checkmark animation frame by frame.
+@MainActor
+enum CheckCapture {
+    static func runIfRequested() {
+        let args = CommandLine.arguments
+        guard let i = args.firstIndex(of: "--capture-check"), i + 1 < args.count else { return }
+        let dir = URL(fileURLWithPath: args[i + 1])
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        _ = NSApplication.shared
+        NSApp.setActivationPolicy(.accessory)
+        let size = NSSize(width: 90, height: 90)
+        let window = NSWindow(contentRect: NSRect(x: 40, y: 40, width: size.width, height: size.height),
+                              styleMask: .borderless, backing: .buffered, defer: false)
+        window.backgroundColor = .black
+        window.orderFrontRegardless()
+        RunLoop.main.run(until: Date().addingTimeInterval(0.3))
+        let host = NSHostingView(rootView: AnimatedCheckmark(size: 64).frame(width: 90, height: 90).background(Color.black))
+        host.frame = NSRect(origin: .zero, size: size)
+        window.contentView = host
+        var frames: [CGImage] = []
+        let start = Date()
+        while Date().timeIntervalSince(start) < 1.1 {
+            RunLoop.main.run(until: Date().addingTimeInterval(1.0 / 30))
+            let ctx = CGContext(data: nil, width: 90, height: 90, bitsPerComponent: 8, bytesPerRow: 0,
+                                space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+            ctx.translateBy(x: 0, y: 90); ctx.scaleBy(x: 1, y: -1)
+            (host.layer?.presentation() ?? host.layer)?.render(in: ctx)
+            if let img = ctx.makeImage() { frames.append(img) }
+        }
+        let sheet = CGContext(data: nil, width: 94 * frames.count, height: 90, bitsPerComponent: 8, bytesPerRow: 0,
+                              space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+        sheet.setFillColor(NSColor.darkGray.cgColor)
+        sheet.fill(CGRect(x: 0, y: 0, width: 94 * frames.count, height: 90))
+        for (n, f) in frames.enumerated() { sheet.draw(f, in: CGRect(x: n * 94, y: 0, width: 90, height: 90)) }
+        if let out = sheet.makeImage(), let png = NSBitmapImageRep(cgImage: out).representation(using: .png, properties: [:]) {
+            try? png.write(to: dir.appendingPathComponent("check.png"))
+        }
+        exit(0)
+    }
+}
