@@ -4,7 +4,9 @@ import ServiceManagement
 enum LoginItem {
     private static let choiceKey = "loginItemUserChoice"
 
-    static var isEnabled: Bool { SMAppService.mainApp.status == .enabled }
+    /// Cached: `SMAppService.status` is a synchronous XPC round trip, and the island's context menu
+    /// reads this on every re-render (each cursor movement near the notch).
+    private(set) static var isEnabled = SMAppService.mainApp.status == .enabled
 
     /// Called from the context-menu toggle; remembers that the user decided explicitly.
     static func setEnabled(_ enabled: Bool) {
@@ -17,6 +19,7 @@ enum LoginItem {
     static func applyOnLaunch() {
         let wanted = UserDefaults.standard.object(forKey: choiceKey) as? Bool ?? true
         if wanted && SMAppService.mainApp.status != .enabled { apply(true) }
+        isEnabled = SMAppService.mainApp.status == .enabled
         debugLog("login item: wanted=\(wanted) status=\(describe(SMAppService.mainApp.status))")
     }
 
@@ -26,6 +29,7 @@ enum LoginItem {
         } catch {
             debugLog("login item change failed: \(error)")
         }
+        isEnabled = SMAppService.mainApp.status == .enabled
     }
 
     private static func describe(_ s: SMAppService.Status) -> String {

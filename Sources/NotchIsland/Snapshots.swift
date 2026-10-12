@@ -461,3 +461,152 @@ enum TabsCapture {
         exit(0)
     }
 }
+
+/// Debug aid: `NotchIsland --bench-gaze` hosts the real island in a window and drives the mascot's
+/// gaze the way cursor movement near the top of the screen does (~60 changes/s for 6 s), then prints
+/// the CPU time the process spent. Used to measure per-update cost of the island view.
+@MainActor
+enum GazeBenchmark {
+    static func runIfRequested() {
+        guard CommandLine.arguments.contains("--bench-gaze") else { return }
+        _ = NSApplication.shared
+        NSApp.setActivationPolicy(.accessory)
+        let model = IslandModel()
+        model.notchSize = CGSize(width: 185, height: 32)
+        let size = NSSize(width: 760, height: 200)
+        let window = NSWindow(contentRect: NSRect(x: 40, y: 40, width: size.width, height: size.height),
+                              styleMask: .borderless, backing: .buffered, defer: false)
+        window.contentView = NSHostingView(rootView: IslandView(model: model))
+        window.orderFrontRegardless()
+        func pump(_ s: Double) { RunLoop.main.run(until: Date().addingTimeInterval(s)) }
+        func cpu() -> Double {
+            var u = rusage()
+            getrusage(RUSAGE_SELF, &u)
+            return Double(u.ru_utime.tv_sec + u.ru_stime.tv_sec) + Double(u.ru_utime.tv_usec + u.ru_stime.tv_usec) / 1e6
+        }
+        pump(1.5)
+        let c0 = cpu(), t0 = Date()
+        var i = 0
+        while Date().timeIntervalSince(t0) < 6 {
+            model.setMascotGaze((CGFloat(sin(Double(i) * 0.15)) * 4).rounded() / 4)
+            i += 1
+            pump(1.0 / 60)
+        }
+        let used = cpu() - c0, wall = Date().timeIntervalSince(t0)
+        print(String(format: "gaze updates: %d, CPU %.2f s over %.1f s = %.1f%%", i, used, wall, used / wall * 100))
+        exit(0)
+    }
+}
+
+/// Debug aid: `NotchIsland --bench-states` shows each collapsed state in the real island for 4 s and
+/// prints the CPU the process spent on it (render + animations), to find expensive states.
+@MainActor
+enum StatesBenchmark {
+    static func runIfRequested() {
+        guard CommandLine.arguments.contains("--bench-states") else { return }
+        _ = NSApplication.shared
+        NSApp.setActivationPolicy(.accessory)
+        let model = IslandModel()
+        model.notchSize = CGSize(width: 185, height: 32)
+        let window = NSWindow(contentRect: NSRect(x: 40, y: 40, width: 760, height: 200),
+                              styleMask: .borderless, backing: .buffered, defer: false)
+        window.contentView = NSHostingView(rootView: IslandView(model: model))
+        window.orderFrontRegardless()
+        func pump(_ s: Double) { RunLoop.main.run(until: Date().addingTimeInterval(s)) }
+        func cpu() -> Double {
+            var u = rusage()
+            getrusage(RUSAGE_SELF, &u)
+            return Double(u.ru_utime.tv_sec + u.ru_stime.tv_sec) + Double(u.ru_utime.tv_usec + u.ru_stime.tv_usec) / 1e6
+        }
+        func measure(_ name: String, _ setUp: () -> Void) {
+            setUp()
+            let c0 = cpu()
+            pump(4)
+            print(String(format: "%-28@ %5.1f%%", name as NSString, (cpu() - c0) / 4 * 100))
+        }
+        pump(1.5)
+        if CommandLine.arguments.contains("--churn") {
+            window.setContentSize(NSSize(width: 760, height: 640))
+            model.refreshMediaNow()
+            pump(1)
+            print("churning, pid \(getpid())")
+            let c0 = cpu()
+            for i in 0..<14 {
+                if i % 2 == 0 {
+                    model.post(.agent, "c", .agentPeek(AgentPeek(project: "NotchIsland", text: "готово", mood: .happy)), duration: 30)
+                } else {
+                    model.activities.dismissAll(.agent)
+                }
+                pump(1)
+            }
+            var u = rusage()
+            getrusage(RUSAGE_SELF, &u)
+            print(String(format: "churn avg %.1f%%  (process total user %.2f s, sys %.2f s, involuntary ctx switches %ld, voluntary %ld)",
+                         (cpu() - c0) / 14 * 100,
+                         Double(u.ru_utime.tv_sec) + Double(u.ru_utime.tv_usec) / 1e6,
+                         Double(u.ru_stime.tv_sec) + Double(u.ru_stime.tv_usec) / 1e6, u.ru_nivcsw, u.ru_nvcsw))
+            exit(0)
+        }
+        if CommandLine.arguments.contains("--real") {
+            window.setContentSize(NSSize(width: 760, height: 640))
+            model.refreshMediaNow()
+            pump(1)
+            measure("music playing (compact)") {}
+            measure("claude starts working") {
+                model.claude.handleHookEvent(["hook_event_name": "UserPromptSubmit", "session_id": "bench", "cwd": "/tmp/bench"], connection: -1)
+            }
+            measure("claude working") {}
+            do {
+                model.claude.handleHookEvent(["hook_event_name": "Stop", "session_id": "bench", "cwd": "/tmp/bench"], connection: -1)
+                var line = "Stop, CPU per 0.25 s:"
+                for _ in 0..<20 {
+                    let c0 = cpu()
+                    pump(0.25)
+                    line += String(format: " %.0f", (cpu() - c0) / 0.25 * 100)
+                }
+                print(line + " (%)")
+            }
+            measure("after готово") {}
+            measure("after готово (2)") {}
+            exit(0)
+        }
+        if CommandLine.arguments.contains("--tail") {
+            measure("device peek") {
+                model.post(.device, "d", .device(DeviceEvent(name: "AirPods", symbol: "airpods", connected: true)), duration: 30)
+            }
+            model.activities.dismissAll(.device)
+            print("idling for sampling, pid \(getpid())")
+            for _ in 0..<5 { measure("  idle after device") {} }
+            exit(0)
+        }
+        measure("idle (mascot)") {}
+        measure("sound Glass") { NSSound(named: "Glass")?.play() }
+        measure("idle after sound") {}
+        measure("mascot happy (cheer)") { model.cheer() }
+        measure("idle after cheer") {}
+        measure("agent done (checkmark)") {
+            model.post(.agent, "a", .agentPeek(AgentPeek(project: "NotchIsland", text: "готово", mood: .happy)), duration: 30)
+        }
+        model.activities.dismissAll(.agent)
+        measure("  idle after checkmark") {}
+        measure("agent waits (attention)") {
+            model.post(.agent, "b", .agentPeek(AgentPeek(project: "NotchIsland", text: "ждёт ответа", mood: .attention)), duration: 30)
+        }
+        model.activities.dismissAll(.agent)
+        measure("  idle after attention") {}
+        measure("device peek") {
+            model.post(.device, "d", .device(DeviceEvent(name: "AirPods", symbol: "airpods", connected: true, battery: 80)), duration: 30)
+        }
+        model.activities.dismissAll(.device)
+        measure("  idle after device") {}
+        measure("notice with timer+spinner") {
+            model.post(.developer, "x", .notice(Notice(symbol: "hammer.fill", title: "swift build", startedAt: Date(), spinning: true)), duration: 30)
+        }
+        model.activities.dismissAll(.developer)
+        measure("  idle after notice") {}
+        measure("pomodoro running") { model.pomodoro.start() }
+        model.pomodoro.reset()
+        measure("back to idle") {}
+        exit(0)
+    }
+}

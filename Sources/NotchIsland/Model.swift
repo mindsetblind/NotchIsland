@@ -602,7 +602,8 @@ final class IslandModel: ObservableObject {
                 MainActor.assumeIsolated {
                     guard let self else { return }
                     if let image { self.artworkCache.set(image, for: key) } else { self.artworkFailures.failed(key, now: Date()) }
-                    guard self.artworkKey == key else { return }
+                    // Setting the same value would still publish a change and re-render the island.
+                    guard self.artworkKey == key, image != nil || self.artwork != nil else { return }
                     withAnimation(.easeInOut(duration: 0.25)) { self.artwork = image }
                 }
             }

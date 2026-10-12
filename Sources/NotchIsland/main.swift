@@ -283,6 +283,8 @@ MainActor.assumeIsolated {
     CheckCapture.runIfRequested()
     SearchCapture.runIfRequested()
     TabsCapture.runIfRequested()
+    GazeBenchmark.runIfRequested()
+    StatesBenchmark.runIfRequested()
 }
 
 MainActor.assumeIsolated {
