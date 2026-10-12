@@ -7,6 +7,7 @@ rm -rf $APP
 mkdir -p $APP/Contents/MacOS $APP/Contents/Resources
 cp .build/release/NotchIsland $APP/Contents/MacOS/
 cp .build/release/notchisland-hook $APP/Contents/MacOS/
+cp .build/release/notchisland-cli $APP/Contents/MacOS/
 cp Info.plist $APP/Contents/
 cp Icon/AppIcon.icns $APP/Contents/Resources/
 # Optional picture/looping video shown while artwork loads (not in git — put your own files there).

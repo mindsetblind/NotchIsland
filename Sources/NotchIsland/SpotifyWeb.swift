@@ -24,6 +24,7 @@ struct PlaybackContext: Equatable {
 
 enum SpotifyError: LocalizedError {
     case noClientID, notLoggedIn, http(Int), badResponse, premiumRequired, noActiveDevice
+    case offline, rateLimited(seconds: Int)
 
     var errorDescription: String? {
         switch self {
@@ -35,6 +36,8 @@ enum SpotifyError: LocalizedError {
         case .badResponse: return "Неожиданный ответ Spotify"
         case .premiumRequired: return "Spotify разрешает выбирать трек из сторонних приложений только с Premium"
         case .noActiveDevice: return "Spotify не видит активного устройства — нажми ⏯ один раз и попробуй снова"
+        case .offline: return "Нет соединения со Spotify — проверь интернет и попробуй снова"
+        case .rateLimited(let s): return "Spotify просит подождать \(max(1, s)) с перед следующим запросом"
         }
     }
 }
@@ -67,6 +70,9 @@ final class SpotifyWeb {
     private var accessToken: String?
     private var expiresAt = Date.distantPast
     private var server: CallbackServer?
+    /// Set from a 429 answer's Retry-After: no requests until then.
+    private var rateLimitedUntil = Date.distantPast
+    private var loginTimeout: DispatchWorkItem?
 
     // MARK: Auth
 
@@ -105,7 +111,13 @@ final class SpotifyWeb {
             return completion(error)
         }
 
-        var c = URLComponents(string: "https://accounts.spotify.com/authorize")!
+        // An abandoned login must not keep the local port open forever.
+        loginTimeout?.cancel()
+        let timeout = DispatchWorkItem { [weak server] in server?.stop() }
+        loginTimeout = timeout
+        DispatchQueue.main.asyncAfter(deadline: .now() + 300, execute: timeout)
+
+        guard var c = URLComponents(string: "https://accounts.spotify.com/authorize") else { return completion(SpotifyError.badResponse) }
         c.queryItems = [
             .init(name: "client_id", value: clientID),
             .init(name: "response_type", value: "code"),
@@ -115,7 +127,8 @@ final class SpotifyWeb {
             .init(name: "state", value: state),
             .init(name: "scope", value: Self.scopes),
         ]
-        NSWorkspace.shared.open(c.url!)
+        guard let url = c.url else { return completion(SpotifyError.badResponse) }
+        NSWorkspace.shared.open(url)
     }
 
     func logout() {
@@ -125,16 +138,41 @@ final class SpotifyWeb {
         expiresAt = .distantPast
     }
 
+    /// Runs a request, turning connectivity problems and 429s into clear errors.
+    private func perform(_ req: URLRequest) async throws -> (Data, Int) {
+        if Date() < rateLimitedUntil {
+            throw SpotifyError.rateLimited(seconds: Int(rateLimitedUntil.timeIntervalSinceNow.rounded(.up)))
+        }
+        var req = req
+        req.timeoutInterval = 15
+        let data: Data, response: URLResponse
+        do {
+            (data, response) = try await URLSession.shared.data(for: req)
+        } catch let error as URLError where [.notConnectedToInternet, .networkConnectionLost, .timedOut,
+                                             .cannotFindHost, .cannotConnectToHost, .dnsLookupFailed].contains(error.code) {
+            throw SpotifyError.offline
+        }
+        let http = response as? HTTPURLResponse
+        let status = http?.statusCode ?? 0
+        if status == 429 {
+            let wait = http?.value(forHTTPHeaderField: "Retry-After").flatMap(Int.init) ?? 30
+            rateLimitedUntil = Date().addingTimeInterval(TimeInterval(min(max(wait, 1), 3600)))
+            debugLog("spotify: rate limited for \(wait) s")
+            throw SpotifyError.rateLimited(seconds: wait)
+        }
+        return (data, status)
+    }
+
     private func requestToken(_ form: [String: String]) async throws {
-        var req = URLRequest(url: URL(string: "https://accounts.spotify.com/api/token")!)
+        guard let tokenURL = URL(string: "https://accounts.spotify.com/api/token") else { throw SpotifyError.badResponse }
+        var req = URLRequest(url: tokenURL)
         req.httpMethod = "POST"
         req.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
         var c = URLComponents()
         c.queryItems = form.map { URLQueryItem(name: $0.key, value: $0.value) }
         req.httpBody = c.percentEncodedQuery?.data(using: .utf8)
 
-        let (data, resp) = try await URLSession.shared.data(for: req)
-        let status = (resp as? HTTPURLResponse)?.statusCode ?? 0
+        let (data, status) = try await perform(req)
         if status == 400 || status == 401 {
             // Refresh token revoked or expired: force a fresh login.
             logout()
@@ -154,16 +192,18 @@ final class SpotifyWeb {
         guard let clientID else { throw SpotifyError.noClientID }
         guard let refresh = Keychain.refreshToken else { throw SpotifyError.notLoggedIn }
         try await requestToken(["grant_type": "refresh_token", "refresh_token": refresh, "client_id": clientID])
-        return accessToken!
+        guard let accessToken else { throw SpotifyError.notLoggedIn }
+        return accessToken
     }
 
     /// GET a Web API URL. Returns nil for 204 No Content.
     private func get(_ urlString: String, retry: Bool = true) async throws -> [String: Any]? {
-        let url = URL(string: urlString.hasPrefix("http") ? urlString : Self.api + urlString)!
+        // Paging links come from the server: only follow them to the Web API host.
+        guard let url = URL(string: urlString.hasPrefix("http") ? urlString : Self.api + urlString),
+              url.scheme == "https", url.host == "api.spotify.com" else { throw SpotifyError.badResponse }
         var req = URLRequest(url: url)
         req.setValue("Bearer \(try await validToken())", forHTTPHeaderField: "Authorization")
-        let (data, resp) = try await URLSession.shared.data(for: req)
-        let status = (resp as? HTTPURLResponse)?.statusCode ?? 0
+        let (data, status) = try await perform(req)
         if status == 401 && retry {
             _ = try await validToken(forceRefresh: true)
             return try await get(urlString, retry: false)
@@ -208,21 +248,22 @@ final class SpotifyWeb {
     }
 
     private func send(_ method: String, _ path: String, body: [String: Any], retry: Bool = true) async throws {
-        var req = URLRequest(url: URL(string: Self.api + path)!)
+        guard let url = URL(string: Self.api + path) else { throw SpotifyError.badResponse }
+        var req = URLRequest(url: url)
         req.httpMethod = method
         req.setValue("Bearer \(try await validToken())", forHTTPHeaderField: "Authorization")
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.httpBody = try JSONSerialization.data(withJSONObject: body)
-        let (data, resp) = try await URLSession.shared.data(for: req)
-        let status = (resp as? HTTPURLResponse)?.statusCode ?? 0
+        let (data, status) = try await perform(req)
         if status == 401 && retry {
             _ = try await validToken(forceRefresh: true)
             return try await send(method, path, body: body, retry: false)
         }
-        debugLog("\(method) \(path) → \(status) \(String(data: data, encoding: .utf8) ?? "")")
-        guard !(200..<300).contains(status) else { return }
         let reason = ((try? JSONSerialization.jsonObject(with: data)) as? [String: Any])
             .flatMap { $0["error"] as? [String: Any] }?["reason"] as? String
+        // Status and Spotify's reason code only — never headers or bodies (tokens, account data).
+        debugLog("\(method) \(path.split(separator: "?").first ?? "") → \(status)\(reason.map { " " + $0 } ?? "")")
+        guard !(200..<300).contains(status) else { return }
         switch (status, reason) {
         case (403, "PREMIUM_REQUIRED"): throw SpotifyError.premiumRequired
         case (404, _), (_, "NO_ACTIVE_DEVICE"): throw SpotifyError.noActiveDevice

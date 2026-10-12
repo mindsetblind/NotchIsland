@@ -109,19 +109,19 @@ struct IslandView: View {
                 .frame(width: model.size(for: .pomodoro).width, height: model.notchSize.height)
                 .transition(.islandContent(scale: 0.8))
         case .pomodoroPeek:
-            if let peek = model.pomodoro.peek {
+            if case .pomodoroPeek(let peek) = model.currentActivity {
                 PomodoroPeekView(model: model, peek: peek)
                     .frame(width: model.size(for: .pomodoroPeek).width, height: model.notchSize.height)
                     .transition(.islandContent(scale: 0.8))
             }
         case .color:
-            if let hex = model.colorPeek {
+            if case .color(let hex) = model.currentActivity {
                 ColorPeekView(model: model, hex: hex)
                     .frame(width: model.size(for: .color).width, height: model.notchSize.height)
                     .transition(.islandContent(scale: 0.8))
             }
         case .device:
-            if let event = model.devicePeek {
+            if case .device(let event) = model.currentActivity {
                 DevicePeekView(model: model, event: event)
                     .frame(width: model.size(for: .device).width, height: model.notchSize.height)
                     .transition(.islandContent(scale: 0.8))
@@ -138,9 +138,15 @@ struct IslandView: View {
                 .frame(width: model.size(for: .agent).width, height: model.notchSize.height)
                 .transition(.islandContent(scale: 0.8))
         case .agentPeek:
-            if let peek = model.claude.peek {
+            if case .agentPeek(let peek) = model.currentActivity {
                 AgentPeekView(model: model, peek: peek)
                     .frame(width: model.size(for: .agentPeek).width, height: model.notchSize.height)
+                    .transition(.islandContent(scale: 0.8))
+            }
+        case .notice:
+            if case .notice(let notice) = model.currentActivity {
+                NoticeView(model: model, notice: notice)
+                    .frame(width: model.size(for: .notice).width, height: model.notchSize.height)
                     .transition(.islandContent(scale: 0.8))
             }
         case .drop:
@@ -176,6 +182,8 @@ struct IslandContentEffect: ViewModifier {
 extension AnyTransition {
     /// `delay`: compact states wait a bit longer so they appear as the shape settles into the notch.
     static func islandContent(scale: CGFloat, delay: Double? = nil) -> AnyTransition {
+        // Reduce motion: a plain cross-fade, no blur or zoom.
+        if IslandModel.reduceMotion { return .opacity.animation(.easeInOut(duration: 0.2)) }
         let fx = AnyTransition.modifier(active: IslandContentEffect(progress: 0, scale: scale),
                                         identity: IslandContentEffect(progress: 1, scale: scale))
         return .asymmetric(
@@ -277,8 +285,10 @@ struct ExpandedView: View {
                     Spacer()
                     IconButton(systemName: "gearshape", size: 11) { model.openSettings() }
                         .help("Настройки")
+                        .accessibilityLabel("Настройки")
                     IconButton(systemName: "power", size: 11) { NSApp.terminate(nil) }
                         .help("Выйти")
+                        .accessibilityLabel("Выйти из NotchIsland")
                 }
                 .padding(.trailing, IslandModel.inset - 7) // power button has its own 7pt hit padding
             }
@@ -289,7 +299,10 @@ struct ExpandedView: View {
                 case .music: MediaPanel(model: model).transition(.islandContent(scale: 0.97))
                 case .apps: AppsTab(model: model).transition(.islandContent(scale: 0.97))
                 case .shelf: ShelfTab(model: model).transition(.islandContent(scale: 0.97))
-                case .agents: AgentsTab(model: model, claude: model.claude).transition(.islandContent(scale: 0.97))
+                case .clipboard: ClipboardTab(model: model, history: model.clipboard, store: model.clipboard.store)
+                    .transition(.islandContent(scale: 0.97))
+                case .agents: AgentsTab(model: model, claude: model.claude, tracker: model.developer.tracker)
+                    .transition(.islandContent(scale: 0.97))
                 case .tools: ToolsTab(model: model).transition(.islandContent(scale: 0.97))
                 }
             }
@@ -321,7 +334,7 @@ struct TabBar: View {
                     Image(systemName: tab.symbol)
                         .font(.system(size: 11, weight: .semibold))
                         .foregroundStyle(.white.opacity(selected ? 1 : 0.45))
-                        .frame(width: 24, height: 22)
+                        .frame(width: 22, height: 22)
                         .background {
                             if selected {
                                 Capsule().fill(.white.opacity(0.15))
@@ -337,6 +350,8 @@ struct TabBar: View {
                 }
                 .buttonStyle(.plain)
                 .help(tab.title)
+                .accessibilityLabel(tab.title)
+                .accessibilityAddTraits(selected ? [.isSelected] : [])
             }
         }
     }
@@ -387,9 +402,12 @@ struct MediaPanel: View {
                     Spacer(minLength: 0)
                     HStack(spacing: 22) {
                         IconButton(systemName: "backward.fill", size: 16) { model.perform(.previous) }
+                            .accessibilityLabel("Предыдущий трек")
                         IconButton(systemName: np.isPlaying ? "pause.fill" : "play.fill", size: 22) { model.perform(.playPause) }
+                            .accessibilityLabel(np.isPlaying ? "Пауза" : "Воспроизвести")
                             .contentTransition(.symbolEffect(.replace))
                         IconButton(systemName: "forward.fill", size: 16) { model.perform(.next) }
+                            .accessibilityLabel("Следующий трек")
                     }
                     .frame(maxWidth: .infinity)
                     .overlay(alignment: .leading) {
@@ -401,11 +419,13 @@ struct MediaPanel: View {
                                 }
                             }
                             .help(np.isShuffling ? "Перемешивание включено" : "Перемешивание выключено")
+                            .accessibilityLabel(np.isShuffling ? "Перемешивание включено" : "Перемешивание выключено")
                     }
                     .overlay(alignment: .trailing) {
                         IconButton(systemName: "list.bullet", size: 13) { model.togglePlaylist() }
                             .foregroundStyle(model.showPlaylist ? Color.white : Color.white.opacity(0.55))
                             .help("Плейлист")
+                            .accessibilityLabel("Плейлист")
                     }
                     .padding(.bottom, -5) // optical: icon buttons carry 5pt of hit padding below the glyph
                 }
@@ -416,10 +436,25 @@ struct MediaPanel: View {
                     .frame(width: IslandModel.artworkSize, height: IslandModel.artworkSize)
                     .overlay(Image(systemName: "music.note").font(.system(size: 30)).foregroundStyle(.secondary))
                 VStack(alignment: .leading, spacing: 10) {
-                    Text("Ничего не играет").font(.system(size: 14, weight: .semibold))
-                    HStack(spacing: 8) {
-                        PillButton(title: "Музыка") { open("com.apple.Music") }
-                        PillButton(title: "Spotify") { open("com.spotify.client") }
+                    switch model.mediaProblem {
+                    case .denied(let source)?:
+                        Text("Нет доступа к \(source == .spotify ? "Spotify" : "«Музыке»")")
+                            .font(.system(size: 14, weight: .semibold))
+                        Text("Разреши NotchIsland управлять приложением: Конфиденциальность → Автоматизация.")
+                            .font(.system(size: 11)).foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                        PillButton(title: "Открыть настройки") { model.openAutomationSettings() }
+                    case .unavailable(let source)?:
+                        Text("\(source == .spotify ? "Spotify" : "«Музыка»") не отвечает")
+                            .font(.system(size: 14, weight: .semibold))
+                        Text("Остров попробует снова через минуту.")
+                            .font(.system(size: 11)).foregroundStyle(.secondary)
+                    case nil:
+                        Text("Ничего не играет").font(.system(size: 14, weight: .semibold))
+                        HStack(spacing: 8) {
+                            PillButton(title: "Музыка") { open("com.apple.Music") }
+                            PillButton(title: "Spotify") { open("com.spotify.client") }
+                        }
                     }
                 }
                 Spacer()
@@ -437,7 +472,8 @@ struct ProgressRow: View {
     let np: NowPlaying
 
     var body: some View {
-        TimelineView(.animation(minimumInterval: 1 / 30, paused: !np.isPlaying)) { ctx in
+        // ~12 updates/s is smooth for a bar that moves a couple of points per second, at a third of the cost.
+        TimelineView(.animation(minimumInterval: 1 / 12, paused: !np.isPlaying)) { ctx in
             let pos = np.position(at: ctx.date)
             let fraction = np.duration > 0 ? pos / np.duration : 0
             HStack(spacing: 8) {
@@ -453,6 +489,9 @@ struct ProgressRow: View {
             }
             .font(.system(size: 10, weight: .medium).monospacedDigit())
             .foregroundStyle(.secondary)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("Позиция в треке")
+            .accessibilityValue("\(format(pos)) из \(format(np.duration))")
         }
     }
 
@@ -1094,6 +1133,7 @@ struct TrackRow: View {
     }
 }
 
+@MainActor
 enum SpotifySettings {
     static func askClientID(model: IslandModel) {
         let alert = NSAlert()
@@ -1205,6 +1245,14 @@ final class EqualizerNSView: NSView {
         bars.forEach { $0.backgroundColor = color }
         guard playing != self.playing else { return }
         self.playing = playing
+        // Reduce motion: still bars of different heights instead of bouncing ones.
+        if playing && NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+            for (i, bar) in bars.enumerated() {
+                bar.removeAllAnimations()
+                bar.transform = CATransform3DMakeScale(1, [0.6, 1, 0.75, 0.9][i % 4], 1)
+            }
+            return
+        }
         for (i, bar) in bars.enumerated() {
             bar.removeAllAnimations()
             if playing {

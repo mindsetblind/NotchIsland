@@ -39,18 +39,19 @@ struct PomodoroPeek: Equatable {
 
 /// Classic pomodoro: focus → short break (every 4th: long break) → focus…
 /// Breaks start by themselves; the next focus waits for you.
+@MainActor
 final class Pomodoro: ObservableObject {
     @Published private(set) var phase: PomodoroPhase = .focus
     @Published private(set) var isRunning = false
     @Published private(set) var completedToday = 0
     @Published private(set) var preset: PomodoroPreset
-    @Published private(set) var peek: PomodoroPeek?
+    /// A phase ended: the island shows it as an alert.
+    var onAnnounce: ((PomodoroPeek) -> Void)?
 
     private var endDate: Date?
     private var pausedRemaining: TimeInterval = 0
     private var focusStreak = 0            // completed focuses since the last long break
     private var ticker: Timer?
-    private var peekWork: DispatchWorkItem?
 
     private static let presetKey = "pomodoroPreset"
     private static let dayKey = "pomodoroDay"
@@ -96,7 +97,9 @@ final class Pomodoro: ObservableObject {
         endDate = Date().addingTimeInterval(pausedRemaining)
         withAnimation(IslandModel.spring) { isRunning = true }
         ticker?.invalidate()
-        ticker = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in self?.tick() }
+        ticker = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.tick() }
+        }
         ticker?.tolerance = 0.2
     }
 
@@ -173,13 +176,7 @@ final class Pomodoro: ObservableObject {
     private func announce(_ p: PomodoroPeek) {
         NSSound(named: "Glass")?.play()
         NSHapticFeedbackManager.defaultPerformer.perform(.levelChange, performanceTime: .now)
-        peekWork?.cancel()
-        withAnimation(IslandModel.spring) { peek = p }
-        let work = DispatchWorkItem { [weak self] in
-            withAnimation(IslandModel.spring) { self?.peek = nil }
-        }
-        peekWork = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + 4, execute: work)
+        onAnnounce?(p)
     }
 
     private func stopTicker() {

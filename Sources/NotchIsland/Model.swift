@@ -1,5 +1,6 @@
 import AppKit
 import Combine
+import NotchIslandCore
 import UniformTypeIdentifiers
 import SwiftUI
 
@@ -16,16 +17,18 @@ enum IslandState: Equatable {
     case permission  // Claude Code asks for permission: card with Allow / Deny
     case agent       // an agent is working / waiting: mascot face around the notch
     case agentPeek   // "готово" / "ждёт ответа"
+    case notice      // any other activity, generic look (developer tasks, low battery, disk space…)
 }
 
 enum IslandTab: String, CaseIterable, Identifiable {
-    case music, apps, shelf, agents, tools
+    case music, apps, shelf, clipboard, agents, tools
     var id: String { rawValue }
     var symbol: String {
         switch self {
         case .music: return "music.note"
         case .apps: return "square.grid.2x2.fill"
         case .shelf: return "tray.fill"
+        case .clipboard: return "doc.on.clipboard"
         case .agents: return "eyes"
         case .tools: return "wrench.and.screwdriver.fill"
         }
@@ -35,24 +38,25 @@ enum IslandTab: String, CaseIterable, Identifiable {
         case .music: return "Музыка"
         case .apps: return "Приложения"
         case .shelf: return "Полка"
-        case .agents: return "Агенты"
+        case .clipboard: return "Буфер"
+        case .agents: return "Агенты и задачи"
         case .tools: return "Инструменты"
         }
     }
 }
 
+@MainActor
 final class IslandModel: ObservableObject {
     @Published var notchSize = CGSize(width: 185, height: 32)
     @Published private(set) var hovering = false
     /// Pointer is over the notch but hasn't expanded it yet: the island "swells" a little.
     @Published private(set) var hoverHint = false
-    @Published private(set) var chargingPeek = false
-    @Published private(set) var devicePeek: DeviceEvent?
-    @Published private(set) var colorPeek: String?
+    /// Decides what the collapsed island shows (live activities + timed alerts).
+    let activities = IslandActivities.live()
+    private var activityObservers: [AnyCancellable] = []
     /// Recently picked colors as "#RRGGBB", newest first (persisted).
     @Published private(set) var colorHistory: [String] = UserDefaults.standard.stringArray(forKey: "colorHistory") ?? []
     private var colorSampler: NSColorSampler?
-    private var colorPeekWork: DispatchWorkItem?
     /// Files parked on the shelf (persisted between launches).
     @Published private(set) var shelf: [URL] = []
     @Published private(set) var selectedTab: IslandTab =
@@ -69,10 +73,14 @@ final class IslandModel: ObservableObject {
     private(set) var dragOutActive = false
     var onDragOutEnded: (() -> Void)?
     private let devices = DeviceMonitor()
-    private var devicePeekWork: DispatchWorkItem?
     @Published private(set) var fileDragActive = false
     @Published private(set) var dropNear = false
-    @Published private(set) var nowPlaying: NowPlaying?
+    @Published private(set) var nowPlaying: NowPlaying? {
+        didSet {
+            guard (oldValue?.isPlaying == true) != (nowPlaying?.isPlaying == true) else { return }
+            activities.setLive(ActivityID(.music), .music, active: nowPlaying?.isPlaying == true)
+        }
+    }
     @Published private(set) var artwork: NSImage?
     @Published private(set) var battery = Battery.read()
 
@@ -88,13 +96,20 @@ final class IslandModel: ObservableObject {
     let media = MediaService()
     let pomodoro = Pomodoro()
     let claude = ClaudeMonitor()
+    let clipboard = ClipboardHistory()
+    let developer = DeveloperMonitor()
+    private var eventServer: HookSocketServer?
+    /// Screen rectangle of the collapsed island (set by the app delegate), to place popovers under it.
+    var islandScreenRect: (() -> CGRect?)?
     private var claudeObserver: Any?
     private var pomodoroObserver: Any?
     private var settingsObserver: Any?
     let settings = AppSettings.shared
     private var timers: [Timer] = []
-    private var peekWork: DispatchWorkItem?
     private var artworkKey: String?
+    /// Last ~30 covers (≈ a few MB at most): going back to a track shows its cover instantly.
+    private var artworkCache = LRUCache<String, NSImage>(capacity: 30)
+    private var artworkFailures = FailureMemo<String>(retryAfter: 10 * 60)
     private var playlistTask: Task<Void, Never>?
     private var skipTask: Task<Void, Never>?
     private var mediaFetchInFlight = false
@@ -110,35 +125,113 @@ final class IslandModel: ObservableObject {
         spotifyHasClientID = spotify.clientID != nil
         // Island state depends on the timer, so re-render whenever it changes.
         pomodoroObserver = pomodoro.objectWillChange.sink { [weak self] in self?.objectWillChange.send() }
-        claudeObserver = claude.objectWillChange.sink { [weak self] in self?.objectWillChange.send() }
+        // Claude Code sends an event for every tool call; the island itself only cares whether agents
+        // work, wait or are done (and about permission cards). Re-render only when that changes —
+        // the Agents tab observes the monitor directly for the details.
+        claudeObserver = claude.$sessions.combineLatest(claude.$permissions)
+            .map { sessions, permissions in
+                ClaudeSignature(working: sessions.contains { $0.status == .working },
+                                waiting: !permissions.isEmpty || sessions.contains { $0.status == .waiting },
+                                done: sessions.contains { $0.status == .done },
+                                permissions: permissions.map(\.id))
+            }
+            .removeDuplicates()
+            .sink { [weak self] _ in self?.objectWillChange.send() }
         // Toggling what's shown around the notch must re-evaluate the island state right away.
         settingsObserver = settings.objectWillChange.sink { [weak self] in
-            DispatchQueue.main.async { withAnimation(Self.spring) { self?.objectWillChange.send() } }
+            DispatchQueue.main.async {
+                guard let self else { return }
+                withAnimation(Self.spring) {
+                    self.applyActivitySettings()
+                    self.objectWillChange.send()
+                }
+            }
+        }
+        setUpActivities()
+    }
+
+    private struct ClaudeSignature: Equatable {
+        var working: Bool, waiting: Bool, done: Bool
+        var permissions: [UUID]
+    }
+
+    // MARK: - Activities
+
+    private func setUpActivities() {
+        applyActivitySettings()
+        activityObservers = [
+            activities.objectWillChange.sink { [weak self] in self?.objectWillChange.send() },
+            pomodoro.$isRunning.removeDuplicates().sink { [weak self] running in
+                self?.activities.setLive(ActivityID(.pomodoro), .pomodoro, active: running)
+            },
+            claude.$sessions.combineLatest(claude.$permissions).sink { [weak self] sessions, permissions in
+                let busy = !permissions.isEmpty || sessions.contains { $0.status == .working || $0.status == .waiting }
+                self?.activities.setLive(ActivityID(.agent), .agent, active: busy)
+            },
+        ]
+        pomodoro.onAnnounce = { [weak self] peek in
+            self?.post(.pomodoro, "phase", .pomodoroPeek(peek), duration: 4)
+        }
+        claude.onPeek = { [weak self] peek in
+            self?.post(.agent, peek.project, .agentPeek(peek), duration: 3.5)
+        }
+        clipboard.onCopiedBack = { [weak self] item in
+            guard let self, !self.isExpanded else { return }
+            self.post(.clipboard, "", .notice(Notice(symbol: "doc.on.clipboard", tint: .green, title: "Скопировано",
+                                                       detail: item.preview, tab: .clipboard)), duration: 1.8)
         }
     }
 
+    /// What the user switched off in Settings, and their order of live activities.
+    private func applyActivitySettings() {
+        let s = settings
+        activities.isAllowed = { kind in
+            switch kind {
+            case .music: return s.showCompactMusic
+            case .pomodoro: return s.showCompactPomodoro
+            // Charging and devices have their own switches, checked where the alert is posted;
+            // "low battery" is checked there too, so turning it off doesn't silence charging.
+            case .battery, .device: return true
+            default: return s.isActivityEnabled(kind)
+            }
+        }
+        activities.priorityOverrides = s.livePriorityOverrides
+        activities.refresh()
+    }
+
+    /// Posts a timed alert with the island's usual animation.
+    func post(_ kind: ActivityKind, _ key: String = "", _ payload: IslandActivity, duration: TimeInterval) {
+        withAnimation(Self.spring) { activities.post(ActivityID(kind, key), payload, duration: duration) }
+    }
+
+    /// Starts/updates (payload) or ends (nil) a live activity.
+    func setLive(_ kind: ActivityKind, _ key: String = "", _ payload: IslandActivity?) {
+        withAnimation(Self.spring) {
+            if let payload { activities.setLive(ActivityID(kind, key), payload) } else { activities.endLive(ActivityID(kind, key)) }
+        }
+    }
+
+    var currentActivity: IslandActivity? { activities.current?.payload }
+
+    /// System setting "Reduce motion": springs and bounces become short cross-fades.
+    nonisolated static var reduceMotion: Bool { NSWorkspace.shared.accessibilityDisplayShouldReduceMotion }
+    private nonisolated static let gentle = Animation.easeInOut(duration: 0.2)
+
     /// General state changes (music started, charging peek).
-    static let spring = Animation.spring(duration: 0.5, bounce: 0.22)
+    nonisolated static var spring: Animation { reduceMotion ? gentle : .spring(duration: 0.5, bounce: 0.22) }
     /// Expanding: a little livelier, like the iPhone island.
-    static let open = Animation.spring(duration: 0.52, bounce: 0.3)
+    nonisolated static var open: Animation { reduceMotion ? gentle : .spring(duration: 0.52, bounce: 0.3) }
     /// Collapsing: critically damped — decelerates smoothly into the notch, no overshoot.
-    static let close = Animation.spring(duration: 0.45, bounce: 0)
+    nonisolated static var close: Animation { reduceMotion ? gentle : .spring(duration: 0.45, bounce: 0) }
     /// Hover "lift", like an app icon under the cursor in the app switcher.
-    static let hint = Animation.spring(duration: 0.35, bounce: 0.45)
+    nonisolated static var hint: Animation { reduceMotion ? gentle : .spring(duration: 0.35, bounce: 0.45) }
 
     var state: IslandState {
+        // Interactive states first: they need the user's hands.
         if fileDragActive && dropNear { return .drop }
         if !claude.permissions.isEmpty { return .permission }
         if hovering { return .expanded }
-        if chargingPeek { return .charging }
-        if claude.peek != nil { return .agentPeek }
-        if pomodoro.peek != nil { return .pomodoroPeek }
-        if colorPeek != nil { return .color }
-        if devicePeek != nil { return .device }
-        if pomodoro.isRunning && settings.showCompactPomodoro { return .pomodoro }
-        if claude.isAnyWorking || claude.isAnyWaiting { return .agent }
-        if nowPlaying?.isPlaying == true && settings.showCompactMusic { return .music }
-        return .idle
+        return currentActivity?.state ?? .idle
     }
 
     var isExpanded: Bool { hovering }
@@ -178,7 +271,8 @@ final class IslandModel: ObservableObject {
         case .permission: return CGSize(width: max(480, notchSize.width + 290), height: notchSize.height + 118)
         case .agent:    return CGSize(width: notchSize.width + 2 * 52, height: notchSize.height)
         case .agentPeek: return CGSize(width: notchSize.width + 2 * 140, height: notchSize.height)
-        case .expanded: return CGSize(width: max(480, notchSize.width + 290),
+        case .notice:   return CGSize(width: notchSize.width + 2 * 150, height: notchSize.height)
+        case .expanded: return CGSize(width: max(520, notchSize.width + 330),
                                      height: notchSize.height + Self.contentTop + Self.artworkSize + Self.contentBottom
                                         + (selectedTab == .music && showPlaylist ? Self.playlistHeight + Self.contentBottom : 0))
         }
@@ -241,20 +335,89 @@ final class IslandModel: ObservableObject {
 
     func start() {
         claude.start()
+        developer.attach(to: self)
+        startEventServer()
         loadShelf()
         loadApps()
         devices.onEvent = { [weak self] event in self?.showDevicePeek(event) }
         devices.start()
         refreshMedia()
-        timers.append(Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
-            self?.refreshMedia()
-        })
-        timers.append(Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
-            self?.refreshBattery()
-        })
-        timers.append(Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in
-            self?.checkMascotMood()
-        })
+        startMediaObservers()
+        // Power source changes are pushed by IOKit — no polling.
+        power.onChange = { [weak self] in self?.refreshBattery() }
+        power.start()
+        startSystemActivities()
+        let mood = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.checkMascotMood() }
+        }
+        mood.tolerance = 1
+        timers.append(mood)
+    }
+
+    // MARK: - Local events (Claude Code hooks + Developer Mode)
+
+    private func startEventServer() {
+        eventServer = HookSocketServer { [weak self] data, event, fd in
+            let isDev = DevEventParser.isDevEvent(event)
+            // JSON objects aren't Sendable; they are only read on the main actor from here on.
+            nonisolated(unsafe) let event = event
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated {
+                    guard let self else { Darwin.close(fd); return }
+                    if isDev { self.developer.receive(data, connection: fd) } else { self.claude.handleHookEvent(event, connection: fd) }
+                }
+            }
+        }
+        eventServer?.start()
+    }
+
+    // MARK: - Media observation
+
+    private let power = PowerSourceMonitor()
+    private var lowBattery = LowBatteryWatcher()
+    private let disk = DiskSpaceMonitor()
+    private let downloads = DownloadsWatcher()
+    let calendar = CalendarMonitor()
+    private var systemObservers: [AnyCancellable] = []
+    private var lastMediaPoll = Date.distantPast
+    private var mediaNotifyWork: DispatchWorkItem?
+
+    /// Both players announce every play/pause/track change with a distributed notification, so the
+    /// island learns about changes right away. Polling remains only as a safety net and to correct
+    /// the extrapolated position: every second while the player is on screen, rarely otherwise.
+    private func startMediaObservers() {
+        let dnc = DistributedNotificationCenter.default()
+        for name in ["com.spotify.client.PlaybackStateChanged", "com.apple.Music.playerInfo"] {
+            dnc.addObserver(forName: Notification.Name(name), object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.mediaDidNotify() }
+            }
+        }
+        let poll = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.pollMediaIfDue() }
+        }
+        poll.tolerance = 0.3
+        timers.append(poll)
+    }
+
+    /// Coalesces bursts (Spotify sends several notifications per track change).
+    private func mediaDidNotify() {
+        mediaNotifyWork?.cancel()
+        let work = DispatchWorkItem { [weak self] in MainActor.assumeIsolated { self?.refreshMedia() } }
+        mediaNotifyWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.12, execute: work)
+    }
+
+    private var mediaPollInterval: TimeInterval {
+        let playing = nowPlaying?.isPlaying == true
+        if isExpanded && selectedTab == .music { return playing ? 1 : 3 }
+        if playing { return 10 }
+        // Player running but paused, or nothing at all: a launch/quit/play arrives as a notification.
+        return 30
+    }
+
+    private func pollMediaIfDue() {
+        guard Date().timeIntervalSince(lastMediaPoll) >= mediaPollInterval else { return }
+        refreshMedia()
     }
 
     func setHovering(_ value: Bool) {
@@ -278,6 +441,32 @@ final class IslandModel: ObservableObject {
         UserDefaults.standard.set(tab.rawValue, forKey: "selectedTab")
     }
 
+    /// Click on the collapsed island. While an alert is shown, open the tab it belongs to
+    /// (like tapping a live activity on iPhone); otherwise keep the tab the user left.
+    func openFromClick() {
+        if let alert = activities.shownAlert, let tab = Self.tab(for: alert.payload) { selectTab(tab) }
+        setHovering(true)
+    }
+
+    private static func tab(for activity: IslandActivity) -> IslandTab? {
+        switch activity {
+        case .pomodoroPeek: return .tools
+        case .agentPeek: return .agents
+        case .color: return .tools
+        case .notice(let n): return n.tab
+        default: return nil
+        }
+    }
+
+    /// After sleep: state polled from the outside world may be stale.
+    func systemDidWake() {
+        refreshMedia()
+        refreshBattery()
+        checkMascotMood()
+        disk.check()
+        calendar.reschedule()
+    }
+
     /// Keyboard shortcut: open (and keep open) or close the island.
     func toggleFromHotKey() {
         if hovering {
@@ -298,25 +487,70 @@ final class IslandModel: ObservableObject {
 
     // MARK: - Media
 
+    /// Health of each player integration (Automation denied, hung player → back off).
+    private var mediaHealth: [MediaSource: MediaHealth] = [:]
+    /// Shown in the player when a player can't be asked (instead of a silent "nothing playing").
+    @Published private(set) var mediaProblem: MediaProblem?
+
+    enum MediaProblem: Equatable {
+        case denied(MediaSource)
+        case unavailable(MediaSource)
+    }
+
     func refreshMedia() {
         guard !mediaFetchInFlight else { return }
         mediaFetchInFlight = true
+        lastMediaPoll = Date()
         let startedAt = Date()
-        media.fetchAsync { [weak self] np in
-            guard let self else { return }
-            self.mediaFetchInFlight = false
-            // A poll that started before the last command reports the old state — drop it, or the
-            // play/pause icon would briefly flip back. Poll again instead.
-            if startedAt < self.lastCommandAt {
-                self.refreshMedia()
-                return
+        let now = Date()
+        let skip = Set(MediaSource.allCases.filter { !(mediaHealth[$0]?.canAttempt(at: now) ?? true) })
+        media.fetchAsync(skipping: skip) { [weak self] poll in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.mediaFetchInFlight = false
+                // A poll that started before the last command reports the old state — drop it, or the
+                // play/pause icon would briefly flip back. Poll again instead.
+                if startedAt < self.lastCommandAt {
+                    self.refreshMedia()
+                    return
+                }
+                self.recordHealth(poll.access)
+                var np = poll.nowPlaying
+                // The current track's player was skipped this time (backing off): keep what we know.
+                if np == nil, let current = self.nowPlaying, skip.contains(current.source) { np = current }
+                self.apply(np)
             }
-            self.apply(np)
         }
     }
 
     /// Snapshot mode needs the result right away.
-    func refreshMediaNow() { apply(media.fetch()) }
+    func refreshMediaNow() { apply(media.fetch().nowPlaying) }
+
+    private func recordHealth(_ access: [MediaSource: PlayerAccess]) {
+        let now = Date()
+        for (source, result) in access {
+            var h = mediaHealth[source] ?? MediaHealth()
+            if h.record(result, at: now) { debugLog("media: \(source.rawValue) is now \(h.state)") }
+            mediaHealth[source] = h
+        }
+        let problem: MediaProblem? = MediaSource.allCases.lazy.compactMap { source -> MediaProblem? in
+            switch self.mediaHealth[source]?.state {
+            case .denied: return .denied(source)
+            case .unavailable: return .unavailable(source)
+            default: return nil
+            }
+        }.first
+        if problem != mediaProblem { mediaProblem = problem }
+    }
+
+    /// Opens Privacy & Security → Automation, where access to Spotify/Music is granted.
+    func openAutomationSettings() {
+        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Automation") {
+            NSWorkspace.shared.open(url)
+        }
+        // Check again as soon as the user comes back.
+        for s in MediaSource.allCases { mediaHealth[s]?.retrySoon() }
+    }
 
     private func apply(_ polled: NowPlaying?) {
         var np = polled
@@ -353,9 +587,24 @@ final class IslandModel: ObservableObject {
         if np.trackKey != artworkKey {
             artworkKey = np.trackKey
             let key = np.trackKey
+            // Recently seen covers come from memory: no request, no placeholder flash.
+            if let cached = artworkCache.value(for: key) {
+                withAnimation(.easeInOut(duration: 0.2)) { artwork = cached }
+                return
+            }
+            // A cover that failed recently (e.g. the CDN is unreachable) isn't retried on every poll.
+            guard artworkFailures.shouldTry(key, now: Date()) else {
+                if artwork != nil { artwork = nil }
+                return
+            }
+            if artwork != nil { withAnimation(.easeInOut(duration: 0.2)) { artwork = nil } }   // placeholder while loading
             media.loadArtwork(for: np) { [weak self] image in
-                guard let self, self.artworkKey == key else { return }
-                withAnimation(.easeInOut(duration: 0.25)) { self.artwork = image }
+                MainActor.assumeIsolated {
+                    guard let self else { return }
+                    if let image { self.artworkCache.set(image, for: key) } else { self.artworkFailures.failed(key, now: Date()) }
+                    guard self.artworkKey == key else { return }
+                    withAnimation(.easeInOut(duration: 0.25)) { self.artwork = image }
+                }
             }
         }
     }
@@ -420,15 +669,18 @@ final class IslandModel: ObservableObject {
         playlistTask?.cancel()
         playlistLoading = true
         playlistError = nil
-        DispatchQueue.global(qos: .userInitiated).async {
-            let ctx = self.media.musicContext()
+        let media = self.media
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let ctx = media.musicContext()
             DispatchQueue.main.async { [weak self] in
+                MainActor.assumeIsolated {
                 guard let self else { return }
                 self.playlistLoading = false
                 if let ctx {
                     withAnimation(.easeInOut(duration: 0.2)) { self.playlist = ctx }
                 } else {
                     self.playlistError = "«Музыка» не отдала текущий плейлист — так бывает с радио и подборками, не добавленными в медиатеку"
+                }
                 }
             }
         }
@@ -619,8 +871,10 @@ final class IslandModel: ObservableObject {
         Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] timer in
             guard NSEvent.pressedMouseButtons & 1 == 0 else { return }
             timer.invalidate()
-            self?.dragOutActive = false
-            self?.onDragOutEnded?()
+            MainActor.assumeIsolated {
+                self?.dragOutActive = false
+                self?.onDragOutEnded?()
+            }
         }
     }
 
@@ -683,7 +937,17 @@ final class IslandModel: ObservableObject {
         for name in [NSWorkspace.didLaunchApplicationNotification,
                      NSWorkspace.didTerminateApplicationNotification,
                      NSWorkspace.didActivateApplicationNotification] {
-            nc.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in self?.refreshRunningApps() }
+            nc.addObserver(forName: name, object: nil, queue: .main) { [weak self] note in
+                MainActor.assumeIsolated {
+                    self?.refreshRunningApps()
+                    // A player launched or quit: update the island now rather than on the next slow poll.
+                    let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication
+                    if let id = app?.bundleIdentifier, [MediaSource.spotify.bundleID, MediaSource.music.bundleID].contains(id),
+                       note.name != NSWorkspace.didActivateApplicationNotification {
+                        self?.mediaDidNotify()
+                    }
+                }
+            }
         }
         refreshRunningApps()
     }
@@ -704,14 +968,9 @@ final class IslandModel: ObservableObject {
     private func showDevicePeek(_ event: DeviceEvent) {
         let isDrive = event.symbol.hasPrefix("externaldrive")
         guard isDrive ? settings.showDrivePeek : settings.showBluetoothPeek else { return }
-        devicePeekWork?.cancel()
         if event.connected { NSHapticFeedbackManager.defaultPerformer.perform(.levelChange, performanceTime: .now) }
-        withAnimation(Self.spring) { devicePeek = event }
-        let work = DispatchWorkItem { [weak self] in
-            withAnimation(Self.spring) { self?.devicePeek = nil }
-        }
-        devicePeekWork = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + 3.5, execute: work)
+        // Keyed by name: a quick disconnect → reconnect updates one alert instead of queueing two.
+        post(.device, event.name, .device(event), duration: 3.5)
     }
 
     // MARK: - Settings
@@ -719,6 +978,17 @@ final class IslandModel: ObservableObject {
     func openSettings() {
         setHovering(false)
         SettingsWindow.shared.show(model: self)
+    }
+
+    // MARK: - Clipboard history
+
+    func openClipboardSearch() {
+        setHovering(false)
+        ClipboardSearchWindow.shared.show(history: clipboard, below: islandScreenRect?())
+    }
+
+    func toggleClipboardSearch() {
+        if ClipboardSearchWindow.shared.isOpen { ClipboardSearchWindow.shared.close() } else { openClipboardSearch() }
     }
 
     // MARK: - Cleaning mode
@@ -736,23 +1006,26 @@ final class IslandModel: ObservableObject {
         colorSampler = sampler
         NSApp.activate(ignoringOtherApps: true)
         sampler.show { [weak self] color in
-            guard let self else { return }
-            self.colorSampler = nil
-            guard let rgb = color?.usingColorSpace(.sRGB) else { return }   // nil → cancelled with Esc
-            let hex = String(format: "#%02X%02X%02X",
-                             Int((rgb.redComponent * 255).rounded()),
-                             Int((rgb.greenComponent * 255).rounded()),
-                             Int((rgb.blueComponent * 255).rounded()))
-            self.copyColor(hex)
-            self.cheer()
-            withAnimation(Self.spring) {
-                self.colorHistory.removeAll { $0 == hex }
-                self.colorHistory.insert(hex, at: 0)
-                self.colorHistory = Array(self.colorHistory.prefix(12))
-            }
-            UserDefaults.standard.set(self.colorHistory, forKey: "colorHistory")
-            self.showColorPeek(hex)
+            MainActor.assumeIsolated { self?.colorPicked(color) }
         }
+    }
+
+    private func colorPicked(_ color: NSColor?) {
+        colorSampler = nil
+        guard let rgb = color?.usingColorSpace(.sRGB) else { return }   // nil → cancelled with Esc
+        let hex = String(format: "#%02X%02X%02X",
+                         Int((rgb.redComponent * 255).rounded()),
+                         Int((rgb.greenComponent * 255).rounded()),
+                         Int((rgb.blueComponent * 255).rounded()))
+        copyColor(hex)
+        cheer()
+        withAnimation(Self.spring) {
+            colorHistory.removeAll { $0 == hex }
+            colorHistory.insert(hex, at: 0)
+            colorHistory = Array(colorHistory.prefix(12))
+        }
+        UserDefaults.standard.set(colorHistory, forKey: "colorHistory")
+        showColorPeek(hex)
     }
 
     func copyColor(_ text: String) {
@@ -771,14 +1044,8 @@ final class IslandModel: ObservableObject {
     }
 
     private func showColorPeek(_ hex: String) {
-        colorPeekWork?.cancel()
         NSHapticFeedbackManager.defaultPerformer.perform(.levelChange, performanceTime: .now)
-        withAnimation(Self.spring) { colorPeek = hex }
-        let work = DispatchWorkItem { [weak self] in
-            withAnimation(Self.spring) { self?.colorPeek = nil }
-        }
-        colorPeekWork = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2.5, execute: work)
+        post(.color, "", .color(hex), duration: 2.5)
     }
 
     // MARK: - Shuffle
@@ -804,15 +1071,49 @@ final class IslandModel: ObservableObject {
         let pluggedIn = new.onAC && !battery.onAC
         if new != battery { battery = new }
         if pluggedIn && new.hasBattery && settings.showChargingPeek { showChargingPeek() }
+        if let level = lowBattery.update(new), settings.isActivityEnabled(.battery) {
+            post(.battery, "low", .notice(Notice(symbol: level <= 10 ? "battery.0percent" : "battery.25percent", tint: .red,
+                                                 title: "Низкий заряд", detail: "\(level)%")), duration: 5)
+        }
+    }
+
+    // MARK: - System activities
+
+    private func startSystemActivities() {
+        disk.onLow = { [weak self] bytes in
+            let free = ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
+            self?.post(.disk, "", .notice(Notice(symbol: "internaldrive.fill", tint: .orange, title: "Мало места на диске",
+                                                 detail: "свободно \(free)")), duration: 5)
+        }
+        disk.start()
+        downloads.onFinished = { [weak self] url in
+            self?.post(.download, url.lastPathComponent, .notice(Notice(symbol: "arrow.down.circle.fill", tint: .blue,
+                                                                        title: url.lastPathComponent, detail: "загружено")),
+                       duration: 3.5)
+        }
+        calendar.onAlert = { [weak self] event, startingNow in
+            let time = event.startDate.map { DateFormatter.localizedString(from: $0, dateStyle: .none, timeStyle: .short) } ?? ""
+            self?.post(.calendar, event.calendarItemIdentifier, .notice(Notice(
+                symbol: "calendar", tint: .blue, title: event.title ?? "Событие",
+                detail: startingNow ? "начинается" : "в \(time)")), duration: startingNow ? 6 : 5)
+        }
+        systemObservers = [
+            settings.$downloadsWatchEnabled.removeDuplicates().sink { [weak self] on in
+                MainActor.assumeIsolated { on ? self?.downloads.start() : self?.downloads.stop() }
+            },
+            settings.$calendarEnabled.removeDuplicates().sink { [weak self] on in
+                MainActor.assumeIsolated { self?.calendar.setEnabled(on) }
+            },
+            settings.$calendarLeadMinutes.removeDuplicates().sink { [weak self] minutes in
+                MainActor.assumeIsolated {
+                    self?.calendar.leadMinutes = minutes
+                    self?.calendar.reschedule()
+                }
+            },
+        ]
     }
 
     private func showChargingPeek() {
-        peekWork?.cancel()
-        withAnimation(Self.spring) { chargingPeek = true }
-        let work = DispatchWorkItem { [weak self] in
-            withAnimation(Self.spring) { self?.chargingPeek = false }
-        }
-        peekWork = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + 3, execute: work)
+        post(.battery, "charging", .charging(battery), duration: 3)
     }
 }

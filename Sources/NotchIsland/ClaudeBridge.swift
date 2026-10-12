@@ -36,13 +36,13 @@ struct AgentPeek: Equatable {
 }
 
 /// Live state of Claude Code sessions, fed by `notchisland-hook` through a Unix socket.
+@MainActor
 final class ClaudeMonitor: ObservableObject {
     @Published private(set) var sessions: [ClaudeSession] = []
     @Published private(set) var permissions: [PermissionAsk] = []
-    @Published private(set) var peek: AgentPeek?
+    /// "готово" / "ждёт ответа": the island shows it as an alert.
+    var onPeek: ((AgentPeek) -> Void)?
 
-    private var server: HookSocketServer?
-    private var peekWork: DispatchWorkItem?
     private var sweeper: Timer?
 
     var isAnyWorking: Bool { sessions.contains { $0.status == .working } }
@@ -69,17 +69,19 @@ final class ClaudeMonitor: ObservableObject {
         permissions = [PermissionAsk(sessionID: "a", project: "NotchIsland", toolName: "Bash", title: "Запустить команду",
                                      detail: "swift build -c release && ./build.sh --install",
                                      suggestions: [["type": "addRules"]], connection: -1)]
-        peek = AgentPeek(project: "NotchIsland", text: "готово", mood: .happy)
     }
 
+    /// The socket server is shared with Developer Mode and owned by the model; it forwards Claude
+    /// Code hook events to `handleHookEvent`.
     func start() {
-        server = HookSocketServer { [weak self] event, fd in
-            DispatchQueue.main.async { self?.handle(event, connection: fd) }
-        }
-        server?.start()
         // Forget sessions nobody has heard from in a while (closed terminals don't always say goodbye).
         sweeper = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
-            guard let self else { return }
+            MainActor.assumeIsolated { self?.sweep() }
+        }
+        sweeper?.tolerance = 10
+    }
+
+    private func sweep() {
             let cutoff = Date().addingTimeInterval(-30 * 60)
             withAnimation(IslandModel.spring) {
                 self.sessions.removeAll { $0.updatedAt < cutoff && $0.status != .waiting }
@@ -88,12 +90,11 @@ final class ClaudeMonitor: ObservableObject {
                     self.sessions[i].status = .idle
                 }
             }
-        }
     }
 
     // MARK: Events
 
-    private func handle(_ e: [String: Any], connection fd: Int32) {
+    func handleHookEvent(_ e: [String: Any], connection fd: Int32) {
         guard let name = e["hook_event_name"] as? String, let sid = e["session_id"] as? String else {
             close(fd); return
         }
@@ -159,13 +160,7 @@ final class ClaudeMonitor: ObservableObject {
         }
     }
 
-    private func showPeek(_ p: AgentPeek) {
-        peekWork?.cancel()
-        withAnimation(IslandModel.spring) { peek = p }
-        let work = DispatchWorkItem { [weak self] in withAnimation(IslandModel.spring) { self?.peek = nil } }
-        peekWork = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + 3.5, execute: work)
-    }
+    private func showPeek(_ p: AgentPeek) { onPeek?(p) }
 
     /// Claude Code may give up on the request (Esc in the terminal, timeout): the hook process dies,
     /// its socket hits EOF, and the card must go away by itself.
@@ -310,37 +305,54 @@ final class ClaudeMonitor: ObservableObject {
 
 // MARK: - Socket server
 
-/// Accepts one JSON line per connection from `notchisland-hook`. Permission requests keep their
-/// connection open until answered; everything else is closed right away by the monitor.
-final class HookSocketServer {
+/// Local event socket shared by Claude Code hooks (`notchisland-hook`) and Developer Mode
+/// (`notchisland-cli`, scripts). One JSON line per connection.
+///
+/// Safety:
+/// - a Unix socket in the user's Application Support folder, mode 0600 — no network listener;
+/// - every connection's peer must be the same user (`getpeereid`), others are closed unread;
+/// - messages are capped in size, reads time out, and only a few connections are served at once;
+/// - payloads are data only: nothing received is ever executed.
+final class HookSocketServer: @unchecked Sendable {
     static var socketPath: String {
         FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/Application Support/NotchIsland/claude.sock").path
     }
 
-    private let onEvent: ([String: Any], Int32) -> Void
+    /// Claude Code sends whole tool inputs (a written file can be large); Developer Mode events are
+    /// limited much further by their parser.
+    static let maxMessageBytes = 4_000_000
+    static let maxConcurrentConnections = 16
+
+    /// Called on a background queue with the raw line, the decoded object and the open connection.
+    /// The receiver owns the connection and must close it.
+    private let onEvent: (Data, [String: Any], Int32) -> Void
     private let queue = DispatchQueue(label: "notchisland.hooks", attributes: .concurrent)
+    private let slots = DispatchSemaphore(value: HookSocketServer.maxConcurrentConnections)
     private var listenFD: Int32 = -1
 
-    init(onEvent: @escaping ([String: Any], Int32) -> Void) { self.onEvent = onEvent }
+    init(onEvent: @escaping (Data, [String: Any], Int32) -> Void) { self.onEvent = onEvent }
 
     func start() {
         let path = Self.socketPath
-        try? FileManager.default.createDirectory(atPath: (path as NSString).deletingLastPathComponent,
-                                                 withIntermediateDirectories: true)
+        let dir = (path as NSString).deletingLastPathComponent
+        try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
         unlink(path)
         listenFD = socket(AF_UNIX, SOCK_STREAM, 0)
-        guard listenFD >= 0 else { return }
+        guard listenFD >= 0 else { return debugLog("socket: socket() failed errno=\(errno)") }
         var addr = sockaddr_un()
         addr.sun_family = sa_family_t(AF_UNIX)
         let bytes = Array(path.utf8CString)
-        guard bytes.count <= MemoryLayout.size(ofValue: addr.sun_path) else { return }
+        guard bytes.count <= MemoryLayout.size(ofValue: addr.sun_path) else { return debugLog("socket: path too long") }
         withUnsafeMutableBytes(of: &addr.sun_path) { raw in bytes.withUnsafeBytes { raw.copyMemory(from: $0) } }
+        // Created with owner-only permissions from the start (no window where others could connect).
+        let oldMask = umask(0o077)
         let bound = withUnsafePointer(to: &addr) {
             $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { bind(listenFD, $0, socklen_t(MemoryLayout<sockaddr_un>.size)) }
         }
-        guard bound == 0, listen(listenFD, 16) == 0 else { return }
-        chmod(path, 0o600)   // only this user can talk to the island
+        umask(oldMask)
+        guard bound == 0, listen(listenFD, 16) == 0 else { return debugLog("socket: bind/listen failed errno=\(errno)") }
+        chmod(path, 0o600)
 
         queue.async { [weak self] in self?.acceptLoop() }
     }
@@ -348,23 +360,60 @@ final class HookSocketServer {
     private func acceptLoop() {
         while true {
             let fd = accept(listenFD, nil, nil)
-            if fd < 0 { if errno == EINTR { continue } else { return } }
+            if fd < 0 { if errno == EINTR || errno == ECONNABORTED { continue } else { return } }
+            guard Self.peerIsCurrentUser(fd) else {
+                debugLog("socket: rejected a connection from another user")
+                close(fd)
+                continue
+            }
             var on: Int32 = 1
             setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &on, socklen_t(MemoryLayout<Int32>.size))
-            queue.async { [weak self] in self?.readEvent(fd) }
+            // A client that connects and never finishes its line can't hold a worker forever.
+            var timeout = timeval(tv_sec: 5, tv_usec: 0)
+            setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
+            guard slots.wait(timeout: .now() + 2) == .success else {
+                debugLog("socket: too many connections, dropping one")
+                close(fd)
+                continue
+            }
+            queue.async { [weak self] in
+                guard let self else { close(fd); return }
+                self.readEvent(fd)
+                self.slots.signal()
+            }
         }
+    }
+
+    static func peerIsCurrentUser(_ fd: Int32) -> Bool {
+        var uid: uid_t = 0, gid: gid_t = 0
+        return getpeereid(fd, &uid, &gid) == 0 && uid == getuid()
     }
 
     private func readEvent(_ fd: Int32) {
         var data = Data()
         var buffer = [UInt8](repeating: 0, count: 16384)
-        while data.count < 4_000_000 {
+        while data.count <= Self.maxMessageBytes {
             let n = read(fd, &buffer, buffer.count)
             if n <= 0 { break }
+            if let nl = buffer[0..<n].firstIndex(of: 0x0A) {
+                data.append(contentsOf: buffer[0..<nl])
+                break
+            }
             data.append(contentsOf: buffer[0..<n])
-            if buffer[0..<n].contains(0x0A) { break }
         }
-        guard let event = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { close(fd); return }
-        onEvent(event, fd)
+        guard data.count <= Self.maxMessageBytes,
+              let event = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else {
+            Self.reply(fd, ["ok": false, "error": "expected one JSON object per line, at most \(Self.maxMessageBytes) bytes"])
+            close(fd)
+            return
+        }
+        onEvent(data, event, fd)
+    }
+
+    /// Best-effort one-line answer (senders that don't read it are fine).
+    static func reply(_ fd: Int32, _ object: [String: Any]) {
+        guard var data = try? JSONSerialization.data(withJSONObject: object) else { return }
+        data.append(0x0A)
+        _ = data.withUnsafeBytes { write(fd, $0.baseAddress, data.count) }
     }
 }

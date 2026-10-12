@@ -1,4 +1,5 @@
 import AppKit
+import NotchIslandCore
 import SwiftUI
 
 // MARK: - Permission card (island opens by itself when Claude Code asks)
@@ -289,11 +290,23 @@ struct CheckShape: Shape {
 struct AgentsTab: View {
     @ObservedObject var model: IslandModel
     @ObservedObject var claude: ClaudeMonitor
+    @ObservedObject var tracker: DevTaskTracker
     @State private var installed = ClaudeHooks.isInstalled
 
     var body: some View {
         Group {
-            if !installed {
+            if !tracker.tasks.isEmpty {
+                // Developer tasks first (they're what you're waiting for), then Claude sessions.
+                HStack(alignment: .top, spacing: 14) {
+                    faceTile(tracker.running.isEmpty ? claude.mood : .working)
+                    ScrollView(.vertical, showsIndicators: false) {
+                        VStack(spacing: 2) {
+                            ForEach(tracker.tasks) { t in DevTaskRow(tracker: tracker, task: t) }
+                            ForEach(claude.sessions) { s in SessionRow(claude: claude, session: s) }
+                        }
+                    }
+                }
+            } else if !installed {
                 HStack(spacing: 14) {
                     faceTile(.sleeping)
                     VStack(alignment: .leading, spacing: 10) {

@@ -66,6 +66,16 @@ final class MascotNSView: NSView {
             arc.lineWidth = eyeW * 0.75
             bodyLayer.addSublayer(arc)
         }
+        // "Reduce motion" can be switched while the app runs: re-apply the current mood.
+        NSWorkspace.shared.notificationCenter.addObserver(self, selector: #selector(motionPreferenceChanged),
+                                                          name: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification,
+                                                          object: nil)
+    }
+
+    deinit { NSWorkspace.shared.notificationCenter.removeObserver(self) }
+
+    @objc private func motionPreferenceChanged() {
+        if let mood { configure(mood) }
     }
 
     required init?(coder: NSCoder) { fatalError() }
@@ -137,6 +147,13 @@ final class MascotNSView: NSView {
             arc.path = p
         }
         CATransaction.commit()
+
+        // Reduce motion: the face still shows the mood (eye shape, ^ ^), and blinks, but nothing
+        // glances, hops, bobs or dances.
+        if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+            if mood == .idle || mood == .working || mood == .dancing { addBlink(period: 4) }
+            return
+        }
 
         let look = size * 0.16, hop = size * 0.12
         switch mood {

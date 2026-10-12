@@ -1,9 +1,10 @@
 import AppKit
 import IOKit.ps
+import NotchIslandCore
 
 // MARK: - Now playing (Spotify / Apple Music via AppleScript)
 
-enum MediaSource: String {
+enum MediaSource: String, CaseIterable {
     case spotify = "Spotify"
     case music = "Music"
 
@@ -50,7 +51,8 @@ struct NowPlaying: Equatable {
 
 /// All AppleScript traffic goes through one serial background queue: a Spotify query takes ~100–200 ms,
 /// and doing that on the main thread froze animations once a second.
-final class MediaService {
+/// `@unchecked Sendable`: all mutable state (the compiled-script cache) is only touched on `queue`.
+final class MediaService: @unchecked Sendable {
     private var compiled: [String: NSAppleScript] = [:]
     private let queue = DispatchQueue(label: "notchisland.applescript", qos: .userInitiated)
     private let queueKey = DispatchSpecificKey<Bool>()
@@ -68,58 +70,94 @@ final class MediaService {
     }
 
     private func run(_ source: String) -> NSAppleEventDescriptor? {
-        onQueue { execute(source) }
+        onQueue { execute(source).result }
     }
 
-    private func execute(_ source: String) -> NSAppleEventDescriptor? {
+    /// AppleScript error numbers we tell apart: the user denied Automation access; the app isn't running.
+    static let errNotPermitted = -1743
+    static let errNotRunning = -600
+
+    private func execute(_ source: String) -> (result: NSAppleEventDescriptor?, error: Int?) {
         let script: NSAppleScript
         if let s = compiled[source] {
             script = s
         } else {
-            guard let s = NSAppleScript(source: source) else { return nil }
+            guard let s = NSAppleScript(source: source) else { return (nil, -1) }
             s.compileAndReturnError(nil)
             compiled[source] = s
             script = s
         }
         var error: NSDictionary?
         let result = script.executeAndReturnError(&error)
-        return error == nil ? result : nil
+        guard let error else { return (result, nil) }
+        return (nil, error[NSAppleScript.errorNumber] as? Int ?? -1)
     }
 
+    // A hung player must not block the queue: Apple Events wait 2 minutes by default.
     private static let spotifyInfo = """
+    with timeout of 3 seconds
     tell application "Spotify"
         if player state is stopped then return {"stopped"}
         set t to current track
         return {player state as string, name of t, artist of t, album of t, (duration of t) / 1000, player position, artwork url of t, id of t, shuffling}
     end tell
+    end timeout
     """
 
     private static let musicInfo = """
+    with timeout of 3 seconds
     tell application "Music"
         if player state is stopped then return {"stopped"}
         set t to current track
         return {player state as string, name of t, artist of t, album of t, duration of t, player position, "", (database ID of t) as string, shuffle enabled}
     end tell
+    end timeout
     """
 
+    /// Result of one poll: what's playing, and how each player answered.
+    struct Poll {
+        var nowPlaying: NowPlaying?
+        var access: [MediaSource: PlayerAccess] = [:]
+    }
+
     /// Polls the players in the background and delivers the result on the main thread.
-    func fetchAsync(_ completion: @escaping (NowPlaying?) -> Void) {
+    /// `skip`: players to leave alone this time (backing off after errors).
+    func fetchAsync(skipping skip: Set<MediaSource> = [], _ completion: @escaping @Sendable (Poll) -> Void) {
         queue.async {
-            let result = self.fetch()
+            let result = self.fetch(skipping: skip)
             DispatchQueue.main.async { completion(result) }
         }
     }
 
-    func fetch() -> NowPlaying? {
-        let candidates = [MediaSource.spotify, .music].filter(\.isRunning).compactMap { info(from: $0) }
-        return candidates.first(where: \.isPlaying) ?? candidates.first
+    func fetch(skipping skip: Set<MediaSource> = []) -> Poll {
+        var poll = Poll()
+        var candidates: [NowPlaying] = []
+        for source in [MediaSource.spotify, .music] where !skip.contains(source) {
+            guard source.isRunning else {
+                poll.access[source] = .notRunning
+                continue
+            }
+            let (np, access) = info(from: source)
+            poll.access[source] = access
+            if let np { candidates.append(np) }
+        }
+        poll.nowPlaying = candidates.first(where: \.isPlaying) ?? candidates.first
+        return poll
     }
 
-    private func info(from source: MediaSource) -> NowPlaying? {
+    private func info(from source: MediaSource) -> (NowPlaying?, PlayerAccess) {
         let script = source == .spotify ? Self.spotifyInfo : Self.musicInfo
-        guard let d = run(script), d.numberOfItems >= 7,
-              let state = d.atIndex(1)?.stringValue, state != "stopped" else { return nil }
-        return NowPlaying(
+        let (result, error) = onQueue { execute(script) }
+        if let error {
+            switch error {
+            case Self.errNotPermitted: return (nil, .denied)
+            case Self.errNotRunning: return (nil, .notRunning)
+            default: return (nil, .failed)
+            }
+        }
+        guard let d = result, d.numberOfItems >= 1, let state = d.atIndex(1)?.stringValue else { return (nil, .failed) }
+        guard state != "stopped", d.numberOfItems >= 7 else { return (nil, .ok) }
+        return (NowPlaying(
             source: source,
             title: d.atIndex(2)?.stringValue ?? "",
             artist: d.atIndex(3)?.stringValue ?? "",
@@ -134,7 +172,7 @@ final class MediaService {
                 : nil,
             isShuffling: d.numberOfItems >= 9 ? d.atIndex(9)?.booleanValue ?? false : false,
             fetchedAt: Date()
-        )
+        ), .ok)
     }
 
     func send(_ command: MediaCommand, to source: MediaSource) {
@@ -197,12 +235,24 @@ final class MediaService {
         runAsync("tell application \"\(source.rawValue)\" to set player position to 0")
     }
 
-    func loadArtwork(for np: NowPlaying, completion: @escaping (NSImage?) -> Void) {
+    /// Covers are small; a short timeout keeps an unreachable CDN from holding requests for a minute.
+    private static let artworkSession: URLSession = {
+        let config = URLSessionConfiguration.ephemeral
+        config.timeoutIntervalForRequest = 8
+        config.timeoutIntervalForResource = 15
+        config.urlCache = nil              // cached in memory by the model, never on disk
+        config.waitsForConnectivity = false
+        return URLSession(configuration: config)
+    }()
+
+    func loadArtwork(for np: NowPlaying, completion: @escaping @Sendable (NSImage?) -> Void) {
         switch np.source {
         case .spotify:
-            guard let s = np.artworkURL, let url = URL(string: s) else { return completion(nil) }
-            URLSession.shared.dataTask(with: url) { data, _, _ in
-                let image = data.flatMap(NSImage.init(data:))
+            guard let s = np.artworkURL, let url = URL(string: s), url.scheme == "https" else { return completion(nil) }
+            Self.artworkSession.dataTask(with: url) { data, response, error in
+                let ok = (response as? HTTPURLResponse).map { (200..<300).contains($0.statusCode) } ?? false
+                let image = ok ? data.flatMap(NSImage.init(data:)) : nil
+                if image == nil { debugLog("artwork: \(error.map { "\($0.localizedDescription)" } ?? "bad response")") }
                 DispatchQueue.main.async { completion(image) }
             }.resume()
         case .music:
@@ -243,5 +293,30 @@ struct Battery: Equatable {
             b.onAC = (d[kIOPSPowerSourceStateKey] as? String) == kIOPSACPowerValue
         }
         return b
+    }
+}
+
+/// Calls `onChange` whenever a power source changes (plugged in, unplugged, level changed).
+/// IOKit pushes these, so nothing polls while the Mac sits idle.
+final class PowerSourceMonitor {
+    var onChange: (() -> Void)?
+    private var source: CFRunLoopSource?
+
+    func start() {
+        guard source == nil else { return }
+        let context = Unmanaged.passUnretained(self).toOpaque()
+        guard let loop = IOPSNotificationCreateRunLoopSource({ context in
+            guard let context else { return }
+            Unmanaged<PowerSourceMonitor>.fromOpaque(context).takeUnretainedValue().onChange?()
+        }, context)?.takeRetainedValue() else {
+            debugLog("power: IOPSNotificationCreateRunLoopSource failed")
+            return
+        }
+        source = loop
+        CFRunLoopAddSource(CFRunLoopGetMain(), loop, .defaultMode)
+    }
+
+    deinit {
+        if let source { CFRunLoopRemoveSource(CFRunLoopGetMain(), source, .defaultMode) }
     }
 }

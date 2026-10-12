@@ -1,5 +1,6 @@
 import AppKit
 import Carbon
+import NotchIslandCore
 import SwiftUI
 
 /// Borderless panel that floats above the menu bar and never steals focus.
@@ -25,6 +26,7 @@ final class FirstMouseHostingView<Content: View>: NSHostingView<Content> {
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 }
 
+@MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var panel: IslandPanel!
     private let model = IslandModel()
@@ -35,11 +37,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var dragWatch: Timer?
     private var hotKey: HotKey?
     private var hotKeyObserver: Any?
+    /// ⌃⌥V: clipboard history search (opt-in, see Settings).
+    private var clipboardKey: HotKey?
+    private var clipboardKeyObserver: Any?
     /// Space = play/pause, but only while the island is open on the Music tab.
     private var spaceKey: HotKey?
     private var stateObserver: Any?
     private var enteredAt: Date?
     private var leftAt: Date?
+    /// The display the island is on, chosen at layout time (see `ScreenPlacement.pick`).
+    private var screen: NSScreen?
+    private var screenInfo: ScreenInfo?
 
     private let canvasSize = CGSize(width: 760, height: 640)
 
@@ -51,71 +59,123 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         layoutPanel()
         panel.orderFrontRegardless()
 
+        // Displays plugged in/out, resolution or arrangement changed, primary display changed.
         NotificationCenter.default.addObserver(self, selector: #selector(layoutPanel),
                                                name: NSApplication.didChangeScreenParametersNotification,
                                                object: nil)
+        // After sleep, a display may come back with another ID/frame, and the window server may have
+        // reshuffled windows: lay out again and make sure the panel is ordered in.
+        let ws = NSWorkspace.shared.notificationCenter
+        for name in [NSWorkspace.didWakeNotification, NSWorkspace.screensDidWakeNotification,
+                     NSWorkspace.activeSpaceDidChangeNotification] {
+            ws.addObserver(self, selector: #selector(systemDidWake), name: name, object: nil)
+        }
 
         // React to real mouse movement instead of polling: zero work while the mouse is still.
         NSEvent.addGlobalMonitorForEvents(matching: [.mouseMoved, .leftMouseDragged]) { [weak self] event in
-            if event.type == .leftMouseDragged { self?.detectFileDrag() }
-            self?.trackMouse()
+            let dragged = event.type == .leftMouseDragged
+            MainActor.assumeIsolated {
+                if dragged { self?.detectFileDrag() }
+                self?.trackMouse()
+            }
         }
         NSEvent.addGlobalMonitorForEvents(matching: .leftMouseDown) { [weak self] _ in
-            guard let self else { return }
-            self.dragChangeCount = NSPasteboard(name: .drag).changeCount
-            // Opened from the keyboard: a click anywhere else closes it.
-            if self.model.pinnedOpen, !self.islandRect(padding: 4).contains(NSEvent.mouseLocation) {
-                self.model.setHovering(false)
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.dragChangeCount = NSPasteboard(name: .drag).changeCount
+                // Opened from the keyboard: a click anywhere else closes it.
+                if self.model.pinnedOpen, !self.islandRect(padding: 4).contains(NSEvent.mouseLocation) {
+                    self.model.setHovering(false)
+                }
             }
         }
 
         // ⌥Space opens/closes the island (can be switched off in Settings).
         hotKeyObserver = AppSettings.shared.$hotKeyEnabled.sink { [weak self] enabled in
-            guard let self else { return }
-            self.hotKey = enabled
-                ? HotKey(keyCode: kVK_Space, modifiers: optionKey) { [weak self] in self?.model.toggleFromHotKey() }
-                : nil
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.hotKey = enabled
+                    ? HotKey(keyCode: kVK_Space, modifiers: optionKey) { [weak self] in
+                        MainActor.assumeIsolated { self?.model.toggleFromHotKey() }
+                    }
+                    : nil
+            }
+        }
+        clipboardKeyObserver = AppSettings.shared.$clipboardHotKey.combineLatest(AppSettings.shared.$clipboardEnabled)
+            .sink { [weak self] key, enabled in
+                MainActor.assumeIsolated {
+                    guard let self else { return }
+                    let wanted = key && enabled
+                    guard wanted != (self.clipboardKey != nil) else { return }
+                    self.clipboardKey = wanted
+                        ? HotKey(keyCode: kVK_ANSI_V, modifiers: controlKey | optionKey) { [weak self] in
+                            MainActor.assumeIsolated { self?.model.toggleClipboardSearch() }
+                        }
+                        : nil
+                }
+            }
+        model.islandScreenRect = { [weak self] in
+            guard let info = self?.screenInfo, let model = self?.model else { return nil }
+            return ScreenPlacement.islandRect(size: model.notchSize, padding: 0, on: info)
         }
         // Click on the collapsed island → open it. The click is consumed so nothing underneath reacts.
         NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown) { [weak self] event in
-            guard let self, !self.model.isExpanded, !self.model.fileDragActive,
-                  self.islandRect(padding: 8).contains(NSEvent.mouseLocation) else { return event }
-            self.model.setHovering(true)
-            return nil
+            let consumed = MainActor.assumeIsolated { () -> Bool in
+                guard let self, !self.model.isExpanded, !self.model.fileDragActive,
+                      self.islandRect(padding: 8).contains(NSEvent.mouseLocation) else { return false }
+                self.model.openFromClick()
+                return true
+            }
+            return consumed ? nil : event
         }
         NSEvent.addLocalMonitorForEvents(matching: [.mouseMoved, .leftMouseDragged, .mouseExited]) { [weak self] event in
-            self?.trackMouse()
+            MainActor.assumeIsolated { self?.trackMouse() }
             return event
         }
         model.onDragOutEnded = { [weak self] in self?.trackMouse() }
         stateObserver = model.objectWillChange.sink { [weak self] in
-            DispatchQueue.main.async { self?.updateSpaceKey() }
+            DispatchQueue.main.async { MainActor.assumeIsolated { self?.updateSpaceKey() } }
         }
         model.start()
         LoginItem.applyOnLaunch()
     }
 
-    private var targetScreen: NSScreen? {
-        NSScreen.screens.first { $0.safeAreaInsets.top > 0 } ?? NSScreen.main
+    private var targetScreen: NSScreen? { screen }
+
+    static func info(for screen: NSScreen) -> ScreenInfo {
+        let id = (screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value ?? 0
+        return ScreenInfo(id: id, frame: screen.frame, visibleFrame: screen.visibleFrame,
+                          safeTop: screen.safeAreaInsets.top,
+                          auxLeftWidth: screen.auxiliaryTopLeftArea?.width,
+                          auxRightWidth: screen.auxiliaryTopRightArea?.width)
     }
 
+    /// Picks the display and moves the panel there. Called on every display change and after wake;
+    /// does nothing when nothing changed, so it's cheap to call often. The island's state lives in
+    /// the model and is untouched — only the geometry follows the display.
     @objc private func layoutPanel() {
-        guard let screen = targetScreen else { return }
-        model.notchSize = Self.notchSize(of: screen)
-        let f = screen.frame
-        panel.setFrame(NSRect(x: f.midX - canvasSize.width / 2,
-                              y: f.maxY - canvasSize.height,
-                              width: canvasSize.width,
-                              height: canvasSize.height), display: true)
+        let screens = NSScreen.screens
+        let infos = screens.map(Self.info(for:))
+        guard let chosen = ScreenPlacement.pick(infos), let index = infos.firstIndex(of: chosen) else {
+            // No displays at all (e.g. mid-reconfiguration while waking): keep the old placement.
+            return
+        }
+        screen = screens[index]
+        let notch = ScreenPlacement.notchSize(of: chosen)
+        if model.notchSize != notch { model.notchSize = notch }
+        let frame = ScreenPlacement.panelFrame(canvas: canvasSize, on: chosen)
+        if chosen != screenInfo || panel.frame != frame {
+            if let old = screenInfo, old.id != chosen.id { debugLog("island moved to display \(chosen.id)") }
+            panel.setFrame(frame, display: true)
+        }
+        screenInfo = chosen
+        if !panel.isVisible { panel.orderFrontRegardless() }
     }
 
-    static func notchSize(of screen: NSScreen) -> CGSize {
-        if let l = screen.auxiliaryTopLeftArea, let r = screen.auxiliaryTopRightArea, screen.safeAreaInsets.top > 0 {
-            return CGSize(width: screen.frame.width - l.width - r.width, height: screen.safeAreaInsets.top)
-        }
-        // No physical notch (external display): fake a small pill under the menu bar edge.
-        let menuBar = max(24, screen.frame.maxY - screen.visibleFrame.maxY)
-        return CGSize(width: 190, height: menuBar)
+    @objc private func systemDidWake() {
+        layoutPanel()
+        panel.orderFrontRegardless()
+        model.systemDidWake()
     }
 
     // MARK: File drag → AirDrop
@@ -134,8 +194,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             timer.invalidate()
             // Leave a moment for the drop itself to be delivered before tearing the drop zone down.
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                self?.model.setFileDrag(false)
-                self?.trackMouse()
+                MainActor.assumeIsolated {
+                    self?.model.setFileDrag(false)
+                    self?.trackMouse()
+                }
             }
         }
     }
@@ -145,7 +207,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let wanted = model.isExpanded && model.selectedTab == .music && model.nowPlaying != nil
         guard wanted != (spaceKey != nil) else { return }
         spaceKey = wanted
-            ? HotKey(keyCode: kVK_Space, modifiers: 0) { [weak self] in self?.model.perform(.playPause) }
+            ? HotKey(keyCode: kVK_Space, modifiers: 0) { [weak self] in MainActor.assumeIsolated { self?.model.perform(.playPause) } }
             : nil
     }
 
@@ -163,12 +225,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func islandRect(padding pad: CGFloat) -> CGRect {
-        guard let screen = targetScreen else { return .zero }
-        let size = model.islandSize
-        return CGRect(x: screen.frame.midX - size.width / 2 - pad,
-                      y: screen.frame.maxY - size.height - pad,
-                      width: size.width + pad * 2,
-                      height: size.height + pad + 1)
+        guard let screenInfo else { return .zero }
+        return ScreenPlacement.islandRect(size: model.islandSize, padding: pad, on: screenInfo)
     }
 
     private func trackMouse() {
@@ -183,13 +241,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             panel.ignoresMouseEvents = !near
             return
         }
-        let size = model.islandSize
-        let pad: CGFloat = model.isExpanded ? 4 : 8
-        let rect = CGRect(x: screen.frame.midX - size.width / 2 - pad,
-                          y: screen.frame.maxY - size.height - pad,
-                          width: size.width + pad * 2,
-                          height: size.height + pad + 1)
-        let inside = rect.contains(mouse)
+        let inside = islandRect(padding: model.isExpanded ? 4 : 8).contains(mouse)
         panel.ignoresMouseEvents = !inside
 
         let now = Date()
@@ -217,7 +269,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let pending = (inside && !model.isExpanded && opensOnHover) || (!inside && model.isExpanded && !model.pinnedOpen)
         recheckTimer?.invalidate()
         recheckTimer = pending
-            ? Timer.scheduledTimer(withTimeInterval: 0.05, repeats: false) { [weak self] _ in self?.trackMouse() }
+            ? Timer.scheduledTimer(withTimeInterval: 0.05, repeats: false) { [weak self] _ in
+                MainActor.assumeIsolated { self?.trackMouse() }
+            }
             : nil
     }
 }
@@ -227,10 +281,14 @@ MainActor.assumeIsolated {
     AnimationCapture.runIfRequested()
     MascotCapture.runIfRequested()
     CheckCapture.runIfRequested()
+    SearchCapture.runIfRequested()
+    TabsCapture.runIfRequested()
 }
 
-let app = NSApplication.shared
-let delegate = AppDelegate()
-app.delegate = delegate
-app.setActivationPolicy(.accessory)
-app.run()
+MainActor.assumeIsolated {
+    let app = NSApplication.shared
+    let delegate = AppDelegate()
+    app.delegate = delegate
+    app.setActivationPolicy(.accessory)
+    app.run()
+}

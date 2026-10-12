@@ -1,4 +1,5 @@
 import AppKit
+import NotchIslandCore
 import SwiftUI
 
 /// Debug aid: `NotchIsland --snapshots <dir>` renders every island state to PNG files and quits.
@@ -17,6 +18,13 @@ enum Snapshots {
         render(to: dir)
         UserDefaults.standard.set(savedTab, forKey: "selectedTab")
         exit(0)
+    }
+
+    static func fillDeveloperSample(_ tracker: DevTaskTracker) {
+        tracker.handle(DevEvent(kind: .start, id: "build", title: "swift build -c release", category: .build))
+        tracker.handle(DevEvent(kind: .progress, id: "build", message: "Compiling Views.swift", progress: 0.6))
+        tracker.handle(DevEvent(kind: .start, id: "tests", title: "npm test", category: .test))
+        tracker.handle(DevEvent(kind: .finish, id: "tests", message: "3 failed, 41 passed", status: .failure, exitCode: 1))
     }
 
     private static func render(to dir: URL) {
@@ -49,6 +57,22 @@ enum Snapshots {
         }
 
         model.claude.fillForSnapshots()
+        Snapshots.fillDeveloperSample(model.developer.tracker)
+        let now = Date()
+        model.clipboard.store.showSample([
+            ClipItem(text: "https://github.com/mindsetblind/NotchIsland/pulls", kind: .link, copiedAt: now.addingTimeInterval(-40), sourceApp: "Safari"),
+            ClipItem(text: "swift build -c release && ./build.sh --install", kind: .text, copiedAt: now.addingTimeInterval(-300), pinned: true, sourceApp: "Терминал"),
+            ClipItem(text: "Очень длинный абзац текста, скопированный из заметок, чтобы проверить перенос строк и обрезку в карточке истории буфера обмена.", kind: .text, copiedAt: now.addingTimeInterval(-3600), sourceApp: "Заметки"),
+            ClipItem(text: "#3A7BD5", kind: .text, copiedAt: now.addingTimeInterval(-7200)),
+        ])
+        let clipboardWasEnabled = AppSettings.shared.clipboardEnabled
+        defer { AppSettings.shared.clipboardEnabled = clipboardWasEnabled }
+        model.selectTab(.clipboard)
+        AppSettings.shared.clipboardEnabled = false
+        save("expanded-clipboard-off", model.size(for: .expanded), ExpandedView(model: model))
+        AppSettings.shared.clipboardEnabled = true
+        save("search-clipboard", CGSize(width: 480, height: 380),
+             ClipboardSearchView(history: model.clipboard, store: model.clipboard.store, close: {}))
         if let ask = model.claude.permissions.first {
             save("permission", model.size(for: .permission), PermissionCardView(model: model, claude: model.claude, ask: ask))
         }
@@ -80,6 +104,16 @@ enum Snapshots {
             peek("agent done", .agentPeek, AgentPeekView(model: model, peek: AgentPeek(project: "NotchIsland", text: "готово", mood: .happy)))
             peek("agent waits", .agentPeek, AgentPeekView(model: model, peek: AgentPeek(project: "Java practice", text: "ждёт ответа", mood: .attention)))
             peek("charging", .charging, ChargingPeekView(model: model))
+            peek("build running", .notice, NoticeView(model: model, notice: Notice(
+                symbol: "hammer.fill", title: "swift build", startedAt: Date().addingTimeInterval(-83), spinning: true)))
+            peek("build failed", .notice, NoticeView(model: model, notice: Notice(
+                symbol: "xmark.octagon.fill", tint: .red, title: "Сборка упала", detail: "2 ошибки")))
+            peek("tests passed", .notice, NoticeView(model: model, notice: Notice(
+                symbol: "checkmark.circle.fill", tint: .green, title: "Тесты прошли", detail: "0:42")))
+            peek("low battery", .notice, NoticeView(model: model, notice: Notice(
+                symbol: "battery.25percent", tint: .red, title: "Низкий заряд", detail: "10%")))
+            peek("copied", .notice, NoticeView(model: model, notice: Notice(
+                symbol: "doc.on.clipboard", tint: .green, title: "Скопировано", detail: "https://github.com/mindsetblind")))
             peek("color", .color, ColorPeekView(model: model, hex: "#3A7BD5"))
             peek("pomodoro done", .pomodoroPeek, PomodoroPeekView(model: model, peek:
                 PomodoroPeek(title: "Фокус завершён", subtitle: "перерыв 15 мин", phase: .longBreak)))
@@ -302,6 +336,127 @@ enum CheckCapture {
         for (n, f) in frames.enumerated() { sheet.draw(f, in: CGRect(x: n * 94, y: 0, width: 90, height: 90)) }
         if let out = sheet.makeImage(), let png = NSBitmapImageRep(cgImage: out).representation(using: .png, properties: [:]) {
             try? png.write(to: dir.appendingPathComponent(args.contains("--attention") ? "attention.png" : "check.png"))
+        }
+        exit(0)
+    }
+}
+
+/// Debug aid: `NotchIsland --capture-search <dir>` opens the real clipboard search panel on sample
+/// data (types a query, moves the selection) and saves what its layers render. ImageRenderer can't
+/// draw text fields or scroll views, so `--snapshots` alone can't show this window.
+@MainActor
+enum SearchCapture {
+    static func runIfRequested() {
+        let args = CommandLine.arguments
+        guard let i = args.firstIndex(of: "--capture-search"), i + 1 < args.count else { return }
+        let dir = URL(fileURLWithPath: args[i + 1])
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        _ = NSApplication.shared
+        NSApp.setActivationPolicy(.accessory)
+
+        let history = ClipboardHistory()
+        let now = Date()
+        var sample: [ClipItem] = []
+        for n in 0..<12 {
+            let isLink = n % 3 == 0
+            let text = isLink ? "https://example.com/page/\(n)" : "Заметка номер \(n): немного текста для проверки поиска"
+            let date = now.addingTimeInterval(Double(-n * 400))
+            sample.append(ClipItem(text: text, kind: isLink ? .link : .text, copiedAt: date,
+                                   pinned: n == 4, sourceApp: n % 2 == 0 ? "Safari" : "Заметки"))
+        }
+        history.store.showSample(sample)
+        func pump(_ s: Double) { RunLoop.main.run(until: Date().addingTimeInterval(s)) }
+        pump(0.3)
+        let frontBefore = NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "-"
+        ClipboardSearchWindow.shared.show(history: history, below: CGRect(x: 600, y: 900, width: 185, height: 32))
+        pump(0.6)
+        print("frontmost before: \(frontBefore), after: \(NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "-")")
+        guard let panel = NSApp.windows.first(where: { $0 is ClipboardSearchPanel }), let view = panel.contentView else { exit(1) }
+
+        func save(_ name: String) {
+            guard let layer = view.layer else { return }
+            let size = view.bounds.size, scale: CGFloat = 2
+            guard let ctx = CGContext(data: nil, width: Int(size.width * scale), height: Int(size.height * scale),
+                                      bitsPerComponent: 8, bytesPerRow: 0, space: CGColorSpaceCreateDeviceRGB(),
+                                      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return }
+            ctx.setFillColor(NSColor(white: 0.5, alpha: 1).cgColor)
+            ctx.fill(CGRect(x: 0, y: 0, width: size.width * scale, height: size.height * scale))
+            ctx.scaleBy(x: scale, y: scale)
+            if view.isFlipped { ctx.translateBy(x: 0, y: size.height); ctx.scaleBy(x: 1, y: -1) }
+            layer.render(in: ctx)
+            guard let image = ctx.makeImage(),
+                  let png = NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:]) else { return }
+            try? png.write(to: dir.appendingPathComponent(name + ".png"))
+        }
+        save("search-all")
+        print("search panel is key:", panel.isKeyWindow)
+        // Type "сафари"-less query and move the selection down twice.
+        for ch in "номер 1" {
+            let s = String(ch)
+            if let e = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0,
+                                        windowNumber: panel.windowNumber, context: nil, characters: s,
+                                        charactersIgnoringModifiers: s, isARepeat: false, keyCode: 0) {
+                panel.sendEvent(e)
+            }
+        }
+        pump(0.3)
+        for _ in 0..<2 {
+            if let e = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0,
+                                        windowNumber: panel.windowNumber, context: nil, characters: "\u{F701}",
+                                        charactersIgnoringModifiers: "\u{F701}", isARepeat: false, keyCode: 125) {
+                panel.sendEvent(e)
+            }
+        }
+        pump(0.3)
+        save("search-query")
+        exit(0)
+    }
+}
+
+/// Debug aid: `NotchIsland --capture-tabs <dir>` hosts the expanded island in a real window and saves
+/// what its layers render for every tab — unlike `--snapshots`, this includes scroll views.
+@MainActor
+enum TabsCapture {
+    static func runIfRequested() {
+        let args = CommandLine.arguments
+        guard let i = args.firstIndex(of: "--capture-tabs"), i + 1 < args.count else { return }
+        let dir = URL(fileURLWithPath: args[i + 1])
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        _ = NSApplication.shared
+        NSApp.setActivationPolicy(.accessory)
+        let savedTab = UserDefaults.standard.string(forKey: "selectedTab")
+        defer { UserDefaults.standard.set(savedTab, forKey: "selectedTab") }
+
+        let model = IslandModel()
+        model.notchSize = CGSize(width: 185, height: 32)
+        model.claude.fillForSnapshots()
+        Snapshots.fillDeveloperSample(model.developer.tracker)
+        let size = model.size(for: .expanded)
+        let window = NSWindow(contentRect: NSRect(x: 40, y: 40, width: size.width, height: size.height),
+                              styleMask: .borderless, backing: .buffered, defer: false)
+        let host = NSHostingView(rootView: ExpandedView(model: model)
+            .frame(width: size.width, height: size.height, alignment: .top)
+            .background(Color.black).foregroundStyle(.white).environment(\.colorScheme, .dark))
+        host.frame = NSRect(origin: .zero, size: size)
+        window.contentView = host
+        window.orderFrontRegardless()
+        func pump(_ s: Double) { RunLoop.main.run(until: Date().addingTimeInterval(s)) }
+
+        for tab in IslandTab.allCases {
+            model.selectTab(tab)
+            pump(0.8)
+            guard let layer = host.layer else { continue }
+            let scale: CGFloat = 2
+            guard let ctx = CGContext(data: nil, width: Int(size.width * scale), height: Int(size.height * scale),
+                                      bitsPerComponent: 8, bytesPerRow: 0, space: CGColorSpaceCreateDeviceRGB(),
+                                      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { continue }
+            ctx.scaleBy(x: scale, y: scale)
+            if host.isFlipped { ctx.translateBy(x: 0, y: size.height); ctx.scaleBy(x: 1, y: -1) }
+            layer.render(in: ctx)
+            if let image = ctx.makeImage(),
+               let png = NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:]) {
+                try? png.write(to: dir.appendingPathComponent("tab-\(tab.rawValue).png"))
+            }
         }
         exit(0)
     }
