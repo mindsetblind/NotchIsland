@@ -22,6 +22,11 @@
 	<string>14.0</string>
 	<key>LSUIElement</key>
 	<true/>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
 	<key>NSAppleEventsUsageDescription</key>
 	<string>NotchIsland показывает текущий трек и управляет воспроизведением в Музыке и Spotify, а pet узнаёт, какая папка открыта в Finder.</string>
 	<key>NSBluetoothAlwaysUsageDescription</key>
