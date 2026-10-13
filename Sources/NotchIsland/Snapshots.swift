@@ -698,10 +698,18 @@ enum PetAskBench {
         guard let i = args.firstIndex(of: "--pet-ask"), i + 1 < args.count else { return }
         let request = args[i + 1]
         if let quick = PetQuickIntent.parse(request) { print("quick path: \(quick)") }
-        let brain = ClaudeCodeBrain()
+        // `--openai <base url> <model>`: any OpenAI-compatible endpoint instead of Claude Code.
+        let brain: PetBrain
+        if let j = args.firstIndex(of: "--openai"), j + 2 < args.count, let url = URL(string: args[j + 1]) {
+            let model = args[j + 2]
+            brain = OpenAICompatibleBrain(name: "test", baseURL: url, apiKey: { nil }, model: { model })
+        } else {
+            brain = ClaudeCodeBrain()
+        }
         Task {
             var t = Date()
-            let cold = try? await brain.plan(request, context: PetContext())
+            let cold: PetPlan?
+            do { cold = try await brain.plan(request, context: PetContext()) } catch { print("error:", error); cold = nil }
             print(String(format: "cold: %.2f s → %@", Date().timeIntervalSince(t), String(describing: cold)))
             brain.prewarm()
             try? await Task.sleep(for: .seconds(4))

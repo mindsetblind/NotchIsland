@@ -508,7 +508,7 @@ struct PetPanelView: View {
                 hint(assistant.musicSources.isEmpty ? "⏎ — спросить · перетащи файлы сюда · esc — закрыть"
                                                     : "⏎ — спросить · @ — плейлисты Spotify · esc — закрыть")
                 Spacer()
-                hint("Claude Code · \(settings.petModel.capitalized)")
+                hint(settings.petProvider == .claude ? "Claude Code · \(settings.petModel.capitalized)" : settings.petProvider.short)
             case .plan(let plan, let issues):
                 if !issues.isEmpty {
                     hint("Часть шагов не выйдет — уточни запрос")

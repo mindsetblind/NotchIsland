@@ -26,6 +26,11 @@ final class AppSettings: ObservableObject {
     @Published var petSleepsAtNight: Bool { didSet { save(petSleepsAtNight, "mascotSleepsAtNight") } }
     /// ⌥⇧Space calls the pet out of the notch to help with files.
     @Published var petHotKeyEnabled: Bool { didSet { save(petHotKeyEnabled, "petHotKeyEnabled") } }
+    /// Where the pet thinks: Groq (fast, free key), Ollama (on this Mac) or Claude Code.
+    @Published var petProvider: PetProvider { didSet { save(petProvider.rawValue, "petProvider") } }
+    /// Groq model id; empty = the best available automatically.
+    @Published var petGroqModel: String { didSet { save(petGroqModel, "petGroqModel") } }
+    @Published var petOllamaModel: String { didSet { save(petOllamaModel, "petOllamaModel") } }
     /// Claude model the pet thinks with: "sonnet" (smarter) or "haiku" (faster).
     @Published var petModel: String { didSet { save(petModel, "petModel") } }
     /// The pet now and then offers help on its own (tidy Downloads, screenshots…).
@@ -78,6 +83,9 @@ final class AppSettings: ObservableObject {
         petSleepsAtNight = bool("mascotSleepsAtNight", true)
         petHotKeyEnabled = bool("petHotKeyEnabled", true)
         petModel = d.string(forKey: "petModel") ?? "sonnet"
+        petProvider = PetProvider(rawValue: d.string(forKey: "petProvider") ?? "") ?? .groq
+        petGroqModel = d.string(forKey: "petGroqModel") ?? ""
+        petOllamaModel = d.string(forKey: "petOllamaModel") ?? "qwen2.5:7b"
         petSuggestions = bool("petSuggestions", true)
         petVoice = bool("petVoice", true)
         clipboardEnabled = bool("clipboardEnabled", false)

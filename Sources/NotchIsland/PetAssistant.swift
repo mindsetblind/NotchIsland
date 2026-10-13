@@ -191,12 +191,12 @@ final class ClaudeCodeBrain: PetBrain, @unchecked Sendable {   // state behind `
         lock.withLock { process }?.terminate()
     }
 
-    static func systemPrompt(home: String) -> String {
+    static func systemPrompt(home: String, tools: String = "Glob, Grep и Read") -> String {
         """
         Ты — pet, маленький помощник, который живёт в вырезе экрана MacBook. Помогаешь с файлами и включаешь музыку в Spotify.
         Домашняя папка пользователя: \(home). Работай только внутри неё; ~/Library и скрытые файлы (начинаются с точки) не трогай.
 
-        Сам ты ничего не меняешь. Изучи файлы инструментами Glob, Grep и Read и верни план — его покажут пользователю, и он подтвердит.
+        Сам ты ничего не меняешь. Изучи файлы инструментами (\(tools)) и верни план — его покажут пользователю, и он подтвердит.
         Правила плана:
         - Все пути абсолютные.
         - move, copy и zip: поле to — полный конечный путь вместе с именем файла. Переименование — это move в той же папке.
@@ -313,7 +313,7 @@ final class PetAssistant: ObservableObject {
     init(brain: PetBrain? = nil) {
         let claude = ClaudeCodeBrain()
         claude.model = { AppSettings.shared.petModel }
-        self.brain = brain ?? claude
+        self.brain = brain ?? RoutingBrain(claude: claude)
         voice.onText = { [weak self] text in self?.query = text }
         voiceObserver = voice.objectWillChange.sink { [weak self] in self?.objectWillChange.send() }
     }
