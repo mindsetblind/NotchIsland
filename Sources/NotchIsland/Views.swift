@@ -1136,6 +1136,7 @@ struct TrackRow: View {
 @MainActor
 enum SpotifySettings {
     static func askClientID(model: IslandModel) {
+        model.setHovering(false)   // the open island would float over the dialog
         let alert = NSAlert()
         alert.messageText = "Spotify Client ID"
         alert.informativeText = "Создай приложение на developer.spotify.com/dashboard с Redirect URI \(SpotifyWeb.redirectURI) и вставь сюда его Client ID."

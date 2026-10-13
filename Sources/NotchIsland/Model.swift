@@ -1019,11 +1019,19 @@ final class IslandModel: ObservableObject {
         panel.directoryURL = URL(fileURLWithPath: "/Applications")
         panel.prompt = "Добавить"
         panel.message = "Выбери приложения для быстрого запуска из острова"
+        // The open island floats above normal windows and would cover the picker: get out of the way.
+        // Not runModal: a modal loop also freezes the island's timers, so it couldn't collapse.
+        setHovering(false)
         NSApp.activate(ignoringOtherApps: true)
-        guard panel.runModal() == .OK else { return }
-        let new = panel.urls.filter { !apps.contains($0) }
-        withAnimation(Self.spring) { apps.append(contentsOf: new) }
-        saveApps()
+        panel.begin { [weak self] response in
+            MainActor.assumeIsolated {
+                guard let self, response == .OK else { return }
+                let new = panel.urls.filter { !self.apps.contains($0) }
+                withAnimation(Self.spring) { self.apps.append(contentsOf: new) }
+                self.saveApps()
+            }
+        }
+        panel.orderFrontRegardless()
     }
 
     func removeApp(_ url: URL) {
