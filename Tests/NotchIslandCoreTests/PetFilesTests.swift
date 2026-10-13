@@ -144,3 +144,14 @@ struct PetExecutorTests {
         #expect(!fm.fileExists(atPath: docs + "/B"))
     }
 }
+
+struct PetPlanSchemaTests {
+    @Test func musicMayBeNull() throws {
+        // Models often send "music": null when there's nothing to play; the schema must allow it.
+        let schema = try #require(try JSONSerialization.jsonObject(with: Data(PetPlan.jsonSchema.utf8)) as? [String: Any])
+        let music = try #require((schema["properties"] as? [String: Any])?["music"] as? [String: Any])
+        #expect((music["type"] as? [String])?.contains("null") == true)
+        let plan = try JSONDecoder().decode(PetPlan.self, from: Data(#"{"reply":"ок","files":[],"actions":[],"music":null}"#.utf8))
+        #expect(plan.music == nil)
+    }
+}

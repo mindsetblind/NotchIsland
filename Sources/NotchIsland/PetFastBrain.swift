@@ -96,7 +96,13 @@ final class OpenAICompatibleBrain: PetBrain, @unchecked Sendable {
                 "tool_choice": round == 5 ? ["type": "function", "function": ["name": "answer"]] as Any : "required" as Any,
             ]
             if model.contains("gpt-oss") { body["reasoning_effort"] = "low" }
-            let message = try await chat(body)
+            let message: [String: Any]
+            do {
+                message = try await chat(body)
+            } catch Failure.http(400, let text) where text.contains("validation") {
+                // Groq rejects a tool call that doesn't match its schema; one more try usually fixes it.
+                message = try await chat(body)
+            }
             let calls = message["tool_calls"] as? [[String: Any]] ?? []
             if calls.isEmpty {
                 // No tool call: take a JSON plan from the text, or the text as the reply.

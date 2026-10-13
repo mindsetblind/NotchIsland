@@ -79,7 +79,7 @@ public struct PetPlan: Codable, Equatable, Sendable {
     "actions":{"type":"array","items":{"type":"object","properties":{\
     "kind":{"type":"string","enum":["mkdir","move","copy","trash","zip","open","reveal"]},\
     "path":{"type":"string"},"to":{"type":"string"}},"required":["kind","path"]}},\
-    "music":{"type":"object","properties":{"query":{"type":"string"},\
+    "music":{"type":["object","null"],"properties":{"query":{"type":"string"},\
     "type":{"type":"string","enum":["track","artist","album","playlist"]}},"required":["query","type"]}},\
     "required":["reply","files","actions"]}
     """
