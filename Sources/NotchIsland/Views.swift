@@ -245,12 +245,12 @@ struct PetEarView: View {
     @ObservedObject var model: IslandModel
 
     var body: some View {
-        // Only the right ear (the island is shifted right by half an ear, see `islandShift`).
+        // Only the right ear (the island is shifted right by half an ear, see `islandShift`); the cat
+        // is centred in it — its whiskers already keep clear of the notch edge.
         HStack(spacing: 0) {
             Spacer().frame(width: model.notchSize.width)
             PetView(mood: model.petMood, size: 17, gaze: model.petGaze)
                 .frame(maxWidth: .infinity)
-                .padding(.leading, EarsLayout<EmptyView, EmptyView>.notchGap)
         }
         .frame(height: model.notchSize.height)
     }

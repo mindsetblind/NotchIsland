@@ -275,7 +275,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard model.showsPet, !model.isExpanded else { return model.setPetGaze(nil) }
         // The face sits in the middle of the right ear, whose width depends on the current state.
         let rightEdge = model.islandShift + model.size(for: model.state).width / 2
-        let earStart = model.notchSize.width / 2 + EarsLayout<EmptyView, EmptyView>.notchGap
+        // At rest the cat is centred in its ear; in other states the ear content starts after a gap.
+        let earStart = model.notchSize.width / 2 + (model.state == .idle ? 0 : EarsLayout<EmptyView, EmptyView>.notchGap)
         let faceX = screen.frame.midX + (earStart + rightEdge) / 2
         let fromTop = screen.frame.maxY - mouse.y
         guard fromTop < 260 else { return model.setPetGaze(nil) }
