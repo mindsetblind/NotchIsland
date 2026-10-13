@@ -11,8 +11,10 @@ BIN=$(swift build -c release $ARCHS --show-bin-path)
 
 STAGE=$(mktemp -d)
 APP=$STAGE/NotchIsland.app
-mkdir -p $APP/Contents/MacOS $APP/Contents/Resources
+mkdir -p $APP/Contents/MacOS $APP/Contents/Resources $APP/Contents/Frameworks
 cp $BIN/NotchIsland $BIN/notchisland-hook $BIN/notchisland-cli $APP/Contents/MacOS/
+ditto $BIN/Sparkle.framework $APP/Contents/Frameworks/Sparkle.framework
+rm -rf $APP/Contents/Frameworks/Sparkle.framework/Versions/B/XPCServices $APP/Contents/Frameworks/Sparkle.framework/XPCServices
 cp Info.plist $APP/Contents/
 cp Icon/AppIcon.icns $APP/Contents/Resources/
 # No Resources/placeholder.* here: that's your own media. Settings let the recipient pick theirs.
@@ -47,5 +49,8 @@ TXT
 mkdir -p dist
 rm -f dist/NotchIsland.dmg
 hdiutil create -volname NotchIsland -srcfolder $STAGE -fs HFS+ -format UDZO -ov dist/NotchIsland.dmg >/dev/null
+# The app alone, for release.sh (zip for Sparkle updates).
+rm -rf dist/NotchIsland.app
+ditto $APP dist/NotchIsland.app
 rm -rf $STAGE
 echo "dist/NotchIsland.dmg ($(du -h dist/NotchIsland.dmg | cut -f1))"

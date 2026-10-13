@@ -160,6 +160,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         model.start()
         LoginItem.applyOnLaunch()
+        _ = Updates.shared   // starts the daily update check
     }
 
     private var targetScreen: NSScreen? { screen }

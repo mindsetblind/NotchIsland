@@ -2,12 +2,14 @@
 set -e
 cd "$(dirname "$0")"
 swift build -c release
+BIN=$(swift build -c release --show-bin-path)
 APP=NotchIsland.app
 rm -rf $APP
-mkdir -p $APP/Contents/MacOS $APP/Contents/Resources
-cp .build/release/NotchIsland $APP/Contents/MacOS/
-cp .build/release/notchisland-hook $APP/Contents/MacOS/
-cp .build/release/notchisland-cli $APP/Contents/MacOS/
+mkdir -p $APP/Contents/MacOS $APP/Contents/Resources $APP/Contents/Frameworks
+cp $BIN/NotchIsland $BIN/notchisland-hook $BIN/notchisland-cli $APP/Contents/MacOS/
+# Sparkle (automatic updates). The XPC services are only for sandboxed apps — not needed here.
+ditto $BIN/Sparkle.framework $APP/Contents/Frameworks/Sparkle.framework
+rm -rf $APP/Contents/Frameworks/Sparkle.framework/Versions/B/XPCServices $APP/Contents/Frameworks/Sparkle.framework/XPCServices
 cp Info.plist $APP/Contents/
 cp Icon/AppIcon.icns $APP/Contents/Resources/
 # Optional picture/looping video shown while artwork loads (not in git — put your own files there).
@@ -19,10 +21,11 @@ done
 # across rebuilds. Override with SIGN_IDENTITY=...; falls back to ad-hoc signing if none is found.
 IDENTITY="${SIGN_IDENTITY:-$(security find-identity -v -p codesigning 2>/dev/null | awk '/Apple Development|Developer ID Application|NotchIsland/ {print $2; exit}')}"
 if [[ -n "$IDENTITY" ]]; then
+    codesign --force --deep --sign "$IDENTITY" $APP/Contents/Frameworks/Sparkle.framework
     codesign --force --sign "$IDENTITY" $APP
     echo "Signed with identity $IDENTITY"
 else
-    codesign --force --sign - $APP
+    codesign --force --deep --sign - $APP
     echo "Signed ad-hoc (permissions may be asked again after each rebuild)"
 fi
 echo "Built $APP"

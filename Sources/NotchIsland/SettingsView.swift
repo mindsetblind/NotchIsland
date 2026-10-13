@@ -50,6 +50,7 @@ private struct GeneralSettings: View {
                 Toggle("Запускать при входе в систему", isOn: $launchAtLogin)
                     .onChange(of: launchAtLogin) { _, on in LoginItem.setEnabled(on) }
             }
+            UpdateSettings()
             Section("Остров") {
                 Picker("Раскрывать", selection: $settings.openMode) {
                     ForEach(AppSettings.OpenMode.allCases) { Text($0.title).tag($0) }

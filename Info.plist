@@ -2,21 +2,45 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-    <key>CFBundleIdentifier</key><string>local.notchisland</string>
-    <key>CFBundleName</key><string>NotchIsland</string>
-    <key>CFBundleExecutable</key><string>NotchIsland</string>
-    <key>CFBundleDevelopmentRegion</key><string>ru</string>
-    <key>CFBundleIconFile</key><string>AppIcon</string>
-    <key>CFBundlePackageType</key><string>APPL</string>
-    <key>CFBundleShortVersionString</key><string>1.0</string>
-    <key>CFBundleVersion</key><string>1</string>
-    <key>LSMinimumSystemVersion</key><string>14.0</string>
-    <key>LSUIElement</key><true/>
-    <key>NSBluetoothAlwaysUsageDescription</key><string>NotchIsland показывает, когда подключаются AirPods и другие Bluetooth-устройства.</string>
-    <key>NSCalendarsFullAccessUsageDescription</key><string>NotchIsland напоминает о ближайших событиях у выреза. События читаются только на этом Mac.</string>
-    <key>NSCalendarsUsageDescription</key><string>NotchIsland напоминает о ближайших событиях у выреза. События читаются только на этом Mac.</string>
-    <key>NSMicrophoneUsageDescription</key><string>Pet слушает, пока ты держишь ⌥⇧Space, и превращает речь в запрос. Звук никуда не отправляется.</string>
-    <key>NSSpeechRecognitionUsageDescription</key><string>Речь распознаётся прямо на этом Mac, чтобы pet понял, что ты сказал.</string>
-    <key>NSAppleEventsUsageDescription</key><string>NotchIsland показывает текущий трек и управляет воспроизведением в Музыке и Spotify, а pet узнаёт, какая папка открыта в Finder.</string>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>ru</string>
+	<key>CFBundleExecutable</key>
+	<string>NotchIsland</string>
+	<key>CFBundleIconFile</key>
+	<string>AppIcon</string>
+	<key>CFBundleIdentifier</key>
+	<string>local.notchisland</string>
+	<key>CFBundleName</key>
+	<string>NotchIsland</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>1.0</string>
+	<key>CFBundleVersion</key>
+	<string>1</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>14.0</string>
+	<key>LSUIElement</key>
+	<true/>
+	<key>NSAppleEventsUsageDescription</key>
+	<string>NotchIsland показывает текущий трек и управляет воспроизведением в Музыке и Spotify, а pet узнаёт, какая папка открыта в Finder.</string>
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>NotchIsland показывает, когда подключаются AirPods и другие Bluetooth-устройства.</string>
+	<key>NSCalendarsFullAccessUsageDescription</key>
+	<string>NotchIsland напоминает о ближайших событиях у выреза. События читаются только на этом Mac.</string>
+	<key>NSCalendarsUsageDescription</key>
+	<string>NotchIsland напоминает о ближайших событиях у выреза. События читаются только на этом Mac.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Pet слушает, пока ты держишь ⌥⇧Space, и превращает речь в запрос. Звук никуда не отправляется.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Речь распознаётся прямо на этом Mac, чтобы pet понял, что ты сказал.</string>
+	<key>SUEnableAutomaticChecks</key>
+	<true/>
+	<key>SUFeedURL</key>
+	<string>https://github.com/mindsetblind/NotchIsland/releases/latest/download/appcast.xml</string>
+	<key>SUPublicEDKey</key>
+	<string>7/GMQXvxuaUwjEmclLi1o9DHzMBHXQjyKMP7ZXpBwgI=</string>
+	<key>SUScheduledCheckInterval</key>
+	<integer>86400</integer>
 </dict>
 </plist>

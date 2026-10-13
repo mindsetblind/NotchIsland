@@ -71,6 +71,9 @@ struct IslandView: View {
         .environment(\.colorScheme, .dark)
         .contextMenu {
             Button("Настройки…") { model.openSettings() }
+            if Updates.shared.available {
+                Button("Проверить обновления…") { model.setHovering(false); Updates.shared.checkNow() }
+            }
             Divider()
             Button("Spotify Client ID…") { SpotifySettings.askClientID(model: model) }
             if model.spotifyLoggedIn {
