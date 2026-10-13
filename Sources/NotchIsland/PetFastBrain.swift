@@ -82,6 +82,8 @@ final class OpenAICompatibleBrain: PetBrain, @unchecked Sendable {
 
     func plan(_ request: String, context: PetContext) async throws -> PetPlan {
         let model = try await model()
+        let started = Date()
+        defer { debugLog("pet: \(name) \(model) answered in \(String(format: "%.2f", Date().timeIntervalSince(started))) s") }
         let home = policy.home.path
         var messages: [[String: Any]] = [
             ["role": "system", "content": ClaudeCodeBrain.systemPrompt(home: home, tools: "list_folder, spotlight_search, read_file") + Self.toolNote],
@@ -120,6 +122,8 @@ final class OpenAICompatibleBrain: PetBrain, @unchecked Sendable {
     }
 
     private func chat(_ body: [String: Any]) async throws -> [String: Any] {
+        let t0 = Date()
+        defer { debugLog("pet:   \(name) round trip \(String(format: "%.2f", Date().timeIntervalSince(t0))) s") }
         var req = URLRequest(url: baseURL.appendingPathComponent("chat/completions"))
         req.httpMethod = "POST"
         req.timeoutInterval = 45
@@ -144,6 +148,7 @@ final class OpenAICompatibleBrain: PetBrain, @unchecked Sendable {
         let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
         guard (200..<300).contains(status) else {
             let message = (json?["error"] as? [String: Any])?["message"] as? String ?? String(decoding: data.prefix(200), as: UTF8.self)
+            debugLog("pet: \(name) HTTP \(status): \(message)")
             throw Failure.http(status, message)
         }
         guard let choice = (json?["choices"] as? [[String: Any]])?.first, let message = choice["message"] as? [String: Any] else {

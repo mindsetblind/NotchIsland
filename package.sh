@@ -32,7 +32,10 @@ NotchIsland — Dynamic Island для MacBook с вырезом (macOS 14 и н�
    приложение не нотаризовано в Apple.
    Открой Системные настройки → Конфиденциальность и безопасность, пролистай вниз
    и нажми «Всё равно открыть» напротив NotchIsland. Подтверди паролем.
-   (Или в Терминале: xattr -dr com.apple.quarantine /Applications/NotchIsland.app)
+   Если пишет «Не удаётся открыть программу» (только кнопка OK) — выполни в Терминале
+   xattr -dr com.apple.quarantine /Applications/NotchIsland.app
+   и открой снова. Не помогло — запусти /Applications/NotchIsland.app/Contents/MacOS/NotchIsland
+   в Терминале и пришли автору текст ошибки, версию macOS и процессор.
 3. Остров появится у выреза. Настройки — правый клик по острову → «Настройки…»
    (или открой остров кликом и нажми шестерёнку справа).
 

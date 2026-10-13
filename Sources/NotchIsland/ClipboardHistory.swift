@@ -319,6 +319,11 @@ final class ClipboardSearchPanel: NSPanel {
     }
 
     override func cancelOperation(_ sender: Any?) { close() }
+
+    /// Buttons with their own shortcuts (e.g. the pet's ⌘Z "Отменить") go first; then the editing keys.
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        super.performKeyEquivalent(with: event) || EditShortcuts.handle(event)
+    }
 }
 
 @MainActor

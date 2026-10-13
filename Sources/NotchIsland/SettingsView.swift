@@ -9,7 +9,7 @@ final class SettingsWindow {
 
     func show(model: IslandModel) {
         if window == nil {
-            let w = NSWindow(contentViewController: NSHostingController(rootView: SettingsView(model: model)))
+            let w = EditableWindow(contentViewController: NSHostingController(rootView: SettingsView(model: model)))
             w.title = "Настройки NotchIsland"
             w.styleMask = [.titled, .closable, .miniaturizable]
             w.isReleasedWhenClosed = false
@@ -19,6 +19,13 @@ final class SettingsWindow {
         }
         NSApp.activate(ignoringOtherApps: true)
         window?.makeKeyAndOrderFront(nil)
+    }
+}
+
+/// A window whose text fields get ⌘A / ⌘C / ⌘V / ⌘X / ⌘Z without a menu bar (see EditShortcuts).
+final class EditableWindow: NSWindow {
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        super.performKeyEquivalent(with: event) || EditShortcuts.handle(event)
     }
 }
 

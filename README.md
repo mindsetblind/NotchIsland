@@ -9,6 +9,14 @@
 3. Запусти. Приложение не нотаризовано Apple, поэтому macOS сначала откажется его открывать: зайди в **Системные настройки → Конфиденциальность и безопасность**, пролистай вниз и нажми **«Всё равно открыть»** (один раз).
 4. Остров появится у выреза; настройки — правый клик по острову → «Настройки…».
 
+**Если macOS пишет «Не удаётся открыть программу „NotchIsland“» (только кнопка OK)** — сними метку «скачано из интернета» и открой снова:
+
+```bash
+xattr -dr com.apple.quarantine /Applications/NotchIsland.app
+```
+
+Не помогло — запусти из Терминала `/Applications/NotchIsland.app/Contents/MacOS/NotchIsland` и пришли текст ошибки вместе с версией macOS и процессором (меню  → «Об этом Mac») в [Issues](https://github.com/mindsetblind/NotchIsland/issues).
+
 Дальше NotchIsland обновляется сам. Нужна macOS 14 или новее, Apple Silicon или Intel.
 
 Для pet-помощника (⌥⇧Space) вставь в настройках бесплатный ключ [Groq](https://console.groq.com/keys) — или выбери Ollama / Claude Code. Для плейлистов Spotify нужен свой Client ID (см. «Плейлист Spotify» ниже).
