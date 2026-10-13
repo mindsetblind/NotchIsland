@@ -257,8 +257,8 @@ enum PetCapture {
         let window = NSWindow(contentRect: NSRect(x: 40, y: 40, width: cell.width * CGFloat(moods.count), height: cell.height),
                               styleMask: .borderless, backing: .buffered, defer: false)
         window.backgroundColor = .black
-        let views = moods.map { mood -> PetNSView in
-            let v = PetNSView(size: 64)
+        let views = moods.map { mood -> CatNSView in
+            let v = CatNSView(pointsPerCSSPixel: 64 / 30)
             v.update(mood: mood, gaze: 0)
             return v
         }
@@ -275,6 +275,12 @@ enum PetCapture {
         var shots: [CGImage] = []
         for _ in 0..<5 {
             RunLoop.main.run(until: Date().addingTimeInterval(0.27))
+            // A window capture shows exactly what's on screen (layer.render(in:) ignores 3D transforms).
+            if CommandLine.arguments.contains("--window"),
+               let img = CGWindowListCreateImage(.null, .optionIncludingWindow, CGWindowID(window.windowNumber), [.boundsIgnoreFraming, .nominalResolution]) {
+                shots.append(img)
+                continue
+            }
             let w = Int(container.bounds.width), h = Int(container.bounds.height)
             let ctx = CGContext(data: nil, width: w, height: h, bitsPerComponent: 8, bytesPerRow: 0,
                                 space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
