@@ -54,6 +54,7 @@ struct IslandView: View {
         // A blurred shadow re-rendered on every frame of a resize is expensive, so it only
         // fades in once the island has finished opening, and fades out fast when it closes.
         .shadow(color: .black.opacity(shadowOn ? 0.5 : 0), radius: shadowOn ? 16 : 0, y: shadowOn ? 6 : 0)
+        .offset(x: model.islandShift)
         .onChange(of: model.isLarge) { _, large in
             if large {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) {
@@ -244,11 +245,14 @@ struct PetEarView: View {
     @ObservedObject var model: IslandModel
 
     var body: some View {
-        EarsLayout(notchWidth: model.notchSize.width, height: model.notchSize.height) {
-            Color.clear
-        } right: {
+        // Only the right ear (the island is shifted right by half an ear, see `islandShift`).
+        HStack(spacing: 0) {
+            Spacer().frame(width: model.notchSize.width)
             PetView(mood: model.petMood, size: 17, gaze: model.petGaze)
+                .frame(maxWidth: .infinity)
+                .padding(.leading, EarsLayout<EmptyView, EmptyView>.notchGap)
         }
+        .frame(height: model.notchSize.height)
     }
 }
 

@@ -86,6 +86,22 @@ struct PeekSettings: View {
                 Toggle("Обложка и эквалайзер, когда играет музыка", isOn: $settings.showCompactMusic)
                 Toggle("Таймер помидора", isOn: $settings.showCompactPomodoro)
             }
+            Section("Строка меню") {
+                Toggle("Уступать место длинному меню приложений", isOn: $settings.freeMenuBar)
+                    .onChange(of: settings.freeMenuBar) { _, _ in MenuBarWatcher.shared.check() }
+                if settings.freeMenuBar {
+                    if MenuBarWatcher.shared.hasAccess {
+                        Text("Когда меню активного приложения доходит до острова (Xcode, Photoshop…), остров сжимается до выреза и возвращается, когда меню короче.")
+                            .font(.callout).foregroundStyle(.secondary)
+                    } else {
+                        HStack {
+                            Text("Без доступа работает по списку известных приложений. С «Универсальным доступом» NotchIsland сам видит, где кончается меню любого приложения (только позиции пунктов меню).")
+                                .font(.callout).foregroundStyle(.secondary)
+                            Button("Разрешить…") { MenuBarWatcher.shared.askForAccess() }
+                        }
+                    }
+                }
+            }
             Section("Pet") {
                 Toggle("Всегда виден справа от выреза", isOn: $settings.petAlwaysVisible)
                 Toggle("Засыпает ночью (с 1 до 6)", isOn: $settings.petSleepsAtNight)

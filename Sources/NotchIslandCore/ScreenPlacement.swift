@@ -53,8 +53,8 @@ public enum ScreenPlacement {
     }
 
     /// Hit area of an island of `size` (in screen coordinates), grown by `padding`.
-    public static func islandRect(size: CGSize, padding: CGFloat, on s: ScreenInfo) -> CGRect {
-        CGRect(x: s.frame.midX - size.width / 2 - padding,
+    public static func islandRect(size: CGSize, padding: CGFloat, on s: ScreenInfo, shift: CGFloat = 0) -> CGRect {
+        CGRect(x: s.frame.midX + shift - size.width / 2 - padding,
                y: s.frame.maxY - size.height - padding,
                width: size.width + padding * 2,
                height: size.height + padding + 1)

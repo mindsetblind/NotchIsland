@@ -161,6 +161,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         model.start()
         LoginItem.applyOnLaunch()
         _ = Updates.shared   // starts the daily update check
+        let watcher = MenuBarWatcher.shared
+        watcher.geometry = { [weak self] in
+            guard let self, let info = self.screenInfo else { return nil }
+            return (info.frame.midX, self.model.notchSize.width)
+        }
+        watcher.onChange = { [weak self] room in self?.model.setMenuRoom(room) }
+        watcher.start()
     }
 
     private var targetScreen: NSScreen? { screen }
@@ -267,9 +274,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func updatePetGaze(mouse: NSPoint, screen: NSScreen) {
         guard model.showsPet, !model.isExpanded else { return model.setPetGaze(nil) }
         // The face sits in the middle of the right ear, whose width depends on the current state.
-        let half = model.size(for: model.state).width / 2
+        let rightEdge = model.islandShift + model.size(for: model.state).width / 2
         let earStart = model.notchSize.width / 2 + EarsLayout<EmptyView, EmptyView>.notchGap
-        let faceX = screen.frame.midX + (earStart + half) / 2
+        let faceX = screen.frame.midX + (earStart + rightEdge) / 2
         let fromTop = screen.frame.maxY - mouse.y
         guard fromTop < 260 else { return model.setPetGaze(nil) }
         let raw = max(-1, min(1, (mouse.x - faceX) / 220))
@@ -278,7 +285,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func islandRect(padding pad: CGFloat) -> CGRect {
         guard let screenInfo else { return .zero }
-        return ScreenPlacement.islandRect(size: model.islandSize, padding: pad, on: screenInfo)
+        return ScreenPlacement.islandRect(size: model.islandSize, padding: pad, on: screenInfo, shift: model.islandShift)
     }
 
     private func trackMouse() {

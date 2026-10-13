@@ -239,7 +239,10 @@ final class IslandModel: ObservableObject {
         if fileDragActive && dropNear { return .drop }
         if !claude.permissions.isEmpty { return .permission }
         if hovering { return .expanded }
-        return currentActivity?.state ?? .idle
+        // Long menu bar: lasting activities (music, timer, agents) step aside; short alerts still show.
+        let base = currentActivity?.state ?? .idle
+        if base != .idle, activities.shownAlert == nil, coversMenu(base) { return .idle }
+        return base
     }
 
     var isExpanded: Bool { hovering }
@@ -265,7 +268,7 @@ final class IslandModel: ObservableObject {
 
     func size(for state: IslandState) -> CGSize {
         switch state {
-        case .idle:     return showsPet ? CGSize(width: notchSize.width + 2 * Self.petEar, height: notchSize.height)
+        case .idle:     return showsPet ? CGSize(width: notchSize.width + Self.petEar, height: notchSize.height)
                                            : notchSize
         // Collapsed states never go below the menu bar (= notch height), so they can't cover
         // the top of full-screen windows.
@@ -294,7 +297,24 @@ final class IslandModel: ObservableObject {
     private var lastPetMood: PetMood?
 
     /// While the pet is out helping (⌥⇧Space), its spot right of the notch stays empty.
-    var showsPet: Bool { settings.petAlwaysVisible && !petAssistant.isOpen }
+    var showsPet: Bool { settings.petAlwaysVisible && !petAssistant.isOpen && menuRoom.right >= Self.petEar }
+
+    /// Room the active app's menus leave beside the notch (see MenuBarWatcher): what doesn't fit steps aside.
+    @Published private(set) var menuRoom = MenuBarWatcher.Room()
+    func setMenuRoom(_ room: MenuBarWatcher.Room) {
+        guard room != menuRoom else { return }
+        withAnimation(Self.spring) { menuRoom = room }
+    }
+
+    /// A lasting compact state whose ears would cover menu titles.
+    private func coversMenu(_ s: IslandState) -> Bool {
+        let ear = (size(for: s).width - notchSize.width) / 2
+        return ear > min(menuRoom.left, menuRoom.right)
+    }
+
+    /// Horizontal offset of the island from the notch centre: at rest the pet only needs the right ear,
+    /// so the island doesn't cover the menu bar left of the notch.
+    var islandShift: CGFloat { state == .idle && showsPet ? Self.petEar / 2 : 0 }
     let petAssistant = PetAssistant.shared
     private var petAssistantObserver: Any?
 
