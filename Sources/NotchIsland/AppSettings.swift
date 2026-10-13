@@ -35,6 +35,13 @@ final class AppSettings: ObservableObject {
     @Published var petModel: String { didSet { save(petModel, "petModel") } }
     /// The pet now and then offers help on its own (tidy Downloads, screenshots…).
     @Published var petSuggestions: Bool { didSet { save(petSuggestions, "petSuggestions") } }
+    /// The cat's look (CatSkin id).
+    @Published var catSkin: String {
+        didSet {
+            save(catSkin, "catSkin")
+            NotificationCenter.default.post(name: CatSkin.changed, object: nil)
+        }
+    }
     /// Shrink the island to the notch while the active app's menus reach it.
     @Published var freeMenuBar: Bool { didSet { save(freeMenuBar, "freeMenuBar") } }
     /// Hold ⌥⇧Space to talk to the pet.
@@ -91,6 +98,7 @@ final class AppSettings: ObservableObject {
         petSuggestions = bool("petSuggestions", true)
         petVoice = bool("petVoice", true)
         freeMenuBar = bool("freeMenuBar", true)
+        catSkin = d.string(forKey: "catSkin") ?? "neon"
         clipboardEnabled = bool("clipboardEnabled", false)
         clipboardPaused = bool("clipboardPaused", false)
         clipboardMaxItems = d.object(forKey: "clipboardMaxItems") as? Int ?? 50

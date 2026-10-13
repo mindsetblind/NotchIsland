@@ -15,50 +15,128 @@ private extension NSColor {
 
 private func cg(_ hex: UInt32, _ alpha: CGFloat = 1) -> CGColor { NSColor(hex: hex, alpha: alpha).cgColor }
 
-enum CatStyle {
-    static func pupil(_ mood: PetMood) -> UInt32 {
-        switch mood {
-        case .idle: return 0x27EFFF
-        case .working: return 0xC4FF5C
-        case .attention: return 0xFF4FD8
-        case .happy: return 0x6DFFBC
-        case .sleeping: return 0x27EFFF
-        case .dancing: return 0xFF52D9
-        }
+/// One look of the cat — colours, gradients, outlines and ear shape. The skeleton and all the
+/// animations are shared, so a new look from Figma is just another value here.
+struct CatSkin: Identifiable, Equatable {
+    /// Colour stops: (hex, alpha, location). `hard`: CSS-style hard stops (each colour holds until the next).
+    struct Paint: Equatable { var stops: [(UInt32, CGFloat, CGFloat)]; var hard = false
+        static func == (a: Paint, b: Paint) -> Bool { a.hard == b.hard && a.stops.elementsEqual(b.stops) { $0 == $1 } }
     }
+    enum Stroke: Equatable { case solid(UInt32, CGFloat), gradient(Paint) }
+    enum Ears { case stepped, soft }
+
+    let id: String
+    let title: String
+    let ears: Ears
+    let earFill: Paint
+    let earStroke: Stroke
+    let earStrokeWidth: CGFloat
+    let headFill: Paint
+    let headStroke: Stroke
+    let headStrokeWidth: CGFloat
+    /// Neon: scan stripe, offset colour fringes, glitch slices and signal flicker.
+    let neon: Bool
+    let pupils: [PetMood: UInt32]
+    let pupilGlow: (radius: CGFloat, opacity: Float)
+    let nose: UInt32
+    let noseStroke: UInt32?
+    let mouth: UInt32
+    let whiskers: UInt32
+    let pawFill: Paint
+    let pawStroke: Stroke
+    let pawShadow: (UInt32, CGFloat)
+    let bean: UInt32
+    let beanStroke: UInt32
+    let toes: UInt32
+
+    static func == (a: CatSkin, b: CatSkin) -> Bool { a.id == b.id }
+
+    func pupil(_ mood: PetMood) -> UInt32 { pupils[mood] ?? pupils[.idle] ?? 0xFFFFFF }
+
+    /// From Figma Make: dark glass, cyan rim, magenta scan stripe, stepped pixel ears.
+    static let neonCat = CatSkin(
+        id: "neon", title: "Неон", ears: .stepped,
+        earFill: Paint(stops: [(0x20272B, 1, 0), (0x35DFF2, 1, 0.44), (0x080A0D, 1, 0.52)], hard: true),
+        earStroke: .solid(0x94F5FF, 0.6), earStrokeWidth: 1,
+        headFill: Paint(stops: [(0x252D32, 1, 0), (0x111619, 1, 0.18), (0x176574, 1, 0.70), (0x08090D, 1, 0.78)], hard: true),
+        headStroke: .solid(0x94F5FF, 0.95), headStrokeWidth: 1, neon: true,
+        pupils: [.idle: 0x27EFFF, .working: 0xC4FF5C, .attention: 0xFF4FD8, .happy: 0x6DFFBC, .sleeping: 0x27EFFF, .dancing: 0xFF52D9],
+        pupilGlow: (2.5, 0.9), nose: 0xFF45D5, noseStroke: nil, mouth: 0x8A8795, whiskers: 0x7AEAF5,
+        pawFill: Paint(stops: [(0x263136, 1, 0), (0x176C79, 1, 0.58), (0x08090D, 1, 0.72)], hard: true),
+        pawStroke: .solid(0x59E5F6, 0.45), pawShadow: (0xFF39D3, 0.28), bean: 0x10191C, beanStroke: 0x4DEAFF, toes: 0xFF58D8)
+
+    /// From the Figma file "Pet — NotchIsland", frame "Космический хром": dark metal, violet and amber.
+    static let cosmicChrome: CatSkin = {
+        let rim = Paint(stops: [(0xD3C8F0, 1, 0), (0x9980BC, 1, 0.45), (0xEDBE7C, 1, 0.76), (0x786687, 1, 1)])
+        let metal = Paint(stops: [(0x77758A, 1, 0), (0x3E3D50, 1, 0.18), (0x151621, 1, 0.34), (0x242532, 1, 0.63),
+                                  (0x4B435B, 1, 0.78), (0x827481, 1, 0.86), (0x25212F, 1, 0.92), (0x12131D, 1, 1)])
+        return CatSkin(
+            id: "chrome", title: "Космический хром", ears: .soft,
+            earFill: Paint(stops: [(0xA6A0B2, 1, 0), (0x514861, 1, 0.25), (0x222230, 1, 0.48), (0x383445, 1, 0.8), (0x14151D, 1, 1)]),
+            earStroke: .gradient(rim), earStrokeWidth: 0.5,
+            headFill: metal, headStroke: .gradient(rim), headStrokeWidth: 0.625, neon: false,
+            pupils: [.idle: 0xB998FF, .working: 0xF6BF73, .attention: 0xFFC278, .happy: 0xC8ACFF, .sleeping: 0xB998FF, .dancing: 0xF4B35F],
+            pupilGlow: (1.75, 0.4), nose: 0xFFBD68, noseStroke: 0x19191F, mouth: 0xADA1BF, whiskers: 0xC9B3E9,
+            pawFill: metal, pawStroke: .gradient(rim), pawShadow: (0x9D70D5, 0.13), bean: 0x292432, beanStroke: 0xBC96FF, toes: 0xFFBD68)
+    }()
+
+    static let all = [neonCat, cosmicChrome]
+    static func named(_ id: String) -> CatSkin { all.first { $0.id == id } ?? neonCat }
+    static var current: CatSkin { named(UserDefaults.standard.string(forKey: "catSkin") ?? "neon") }
+    static let changed = Notification.Name("CatSkinChanged")
 }
 
 final class CatNSView: NSView {
     /// Points per CSS pixel.
     private let k: CGFloat
-    private let stage = CALayer()        // CSS coordinates (y down), scaled to the view
-    private let body = CALayer()         // head + everything on it; bobs, tilts, squashes
-    private let ears = [CAGradientLayer(), CAGradientLayer()]
-    private let eyesGroup = CALayer()    // follows the cursor
-    private let eyes = [CALayer(), CALayer()]
-    private let pupilMoves = [CALayer(), CALayer()]
-    private let pupils = [CALayer(), CALayer()]
-    private let muzzle = CALayer()
-    private let whiskers = [CALayer(), CALayer()]
-    private let paws = [CALayer(), CALayer()]
-    private let glitchA = CALayer(), glitchB = CALayer()
+    private var skin: CatSkin
+    private let fixedSkin: CatSkin?
+    // Rebuilt from scratch when the skin changes.
+    private var stage = CALayer()        // CSS coordinates (y down), scaled to the view
+    private var body = CALayer()         // head + everything on it; bobs, tilts, squashes
+    private var ears = [CALayer(), CALayer()]
+    private var eyesGroup = CALayer()    // follows the cursor
+    private var eyes = [CALayer(), CALayer()]
+    private var pupilMoves = [CALayer(), CALayer()]
+    private var pupils = [CALayer(), CALayer()]
+    private var muzzle = CALayer()
+    private var whiskers = [CALayer(), CALayer()]
+    private var paws = [CALayer(), CALayer()]
+    private var glitchA = CALayer(), glitchB = CALayer()
     private var mood: PetMood?
     private var gaze: CGFloat = .nan
     private var laidOutSize: CGSize = .zero
 
     /// `pointsPerCSSPixel`: 17 pt pet → ~0.57 (head ≈ 16 pt tall, 25 pt wide).
-    init(pointsPerCSSPixel: CGFloat) {
+    /// `skin`: a fixed look (previews); nil follows the setting.
+    init(pointsPerCSSPixel: CGFloat, skin fixed: CatSkin? = nil) {
         k = pointsPerCSSPixel
+        self.fixedSkin = fixed
+        skin = fixed ?? CatSkin.current
         super.init(frame: .zero)
         wantsLayer = true
         build()
         NSWorkspace.shared.notificationCenter.addObserver(self, selector: #selector(motionPreferenceChanged),
                                                           name: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification,
                                                           object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(skinChanged), name: CatSkin.changed, object: nil)
     }
 
     required init?(coder: NSCoder) { fatalError() }
-    deinit { NSWorkspace.shared.notificationCenter.removeObserver(self) }
+    deinit {
+        NSWorkspace.shared.notificationCenter.removeObserver(self)
+        NotificationCenter.default.removeObserver(self)
+    }
+
+    /// Another look chosen in Settings: rebuild the layers and carry on with the same mood.
+    @objc private func skinChanged() {
+        guard fixedSkin == nil else { return }
+        skin = CatSkin.current
+        build()
+        positionStage()
+        if let mood { configure(mood) }
+        eyesGroup.transform = CATransform3DMakeTranslation((gaze.isNaN ? 0 : gaze) * 2.5, 0, 0)
+    }
 
     @objc private func motionPreferenceChanged() { if let mood { configure(mood) } }
 
@@ -66,12 +144,16 @@ final class CatNSView: NSView {
         super.layout()
         guard bounds.size != laidOutSize else { return }
         laidOutSize = bounds.size
+        positionStage()
+        if let mood { configure(mood) }
+    }
+
+    private func positionStage() {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         // Centre what you see at rest — ears (7 px above the head) and head — not just the head.
         stage.position = CGPoint(x: bounds.midX, y: bounds.midY - 3.5 * k)   // view is y-up: lower it
         CATransaction.commit()
-        if let mood { configure(mood) }
     }
 
     func update(mood: PetMood, gaze: CGFloat) {
@@ -121,6 +203,37 @@ final class CatNSView: NSView {
         return g
     }
 
+    /// A skin paint as a 135° gradient layer (smooth or CSS-style hard stops).
+    private func paint(_ p: CatSkin.Paint, mirrored: Bool = false) -> CAGradientLayer {
+        if p.hard { return gradient(p.stops, mirrored: mirrored) }
+        let g = CAGradientLayer()
+        g.colors = p.stops.map { cg($0.0, $0.1) }
+        g.locations = p.stops.map { NSNumber(value: Double($0.2)) }
+        g.startPoint = mirrored ? CGPoint(x: 1, y: 0) : .zero
+        g.endPoint = mirrored ? CGPoint(x: 0, y: 1) : CGPoint(x: 1, y: 1)
+        return g
+    }
+
+    /// Outline of `shape` (in `parent`'s coordinates, sized `rect`) — solid or gradient.
+    private func outline(_ parent: CALayer, _ shape: CGPath, _ rect: CGRect, _ stroke: CatSkin.Stroke, width: CGFloat,
+                         mirrored: Bool = false) {
+        let line = CAShapeLayer()
+        line.path = shape
+        line.fillColor = nil
+        line.lineWidth = width
+        line.frame = CGRect(origin: .zero, size: rect.size)
+        switch stroke {
+        case .solid(let hex, let alpha):
+            line.strokeColor = cg(hex, alpha)
+            place(line, in: parent, rect)
+        case .gradient(let p):
+            line.strokeColor = NSColor.white.cgColor
+            let g = paint(p, mirrored: mirrored)
+            g.mask = line
+            place(g, in: parent, rect)
+        }
+    }
+
     private func path(_ pts: [(CGFloat, CGFloat)]) -> CGPath {
         let p = CGMutablePath()
         p.addLines(between: pts.map { CGPoint(x: $0.0, y: $0.1) })
@@ -130,68 +243,78 @@ final class CatNSView: NSView {
 
     private func build() {
         guard let root = layer else { return }
+        stage.removeFromSuperlayer()
+        stage = CALayer(); body = CALayer(); ears = [CALayer(), CALayer()]; eyesGroup = CALayer()
+        eyes = [CALayer(), CALayer()]; pupilMoves = [CALayer(), CALayer()]; pupils = [CALayer(), CALayer()]
+        muzzle = CALayer(); whiskers = [CALayer(), CALayer()]; paws = [CALayer(), CALayer()]
+        glitchA = CALayer(); glitchB = CALayer()
+
         stage.isGeometryFlipped = true
         stage.bounds = CGRect(x: 0, y: 0, width: 44, height: 28)
         stage.transform = CATransform3DMakeScale(k, k, 1)
         root.addSublayer(stage)
         place(body, in: stage, CGRect(x: 0, y: 0, width: 44, height: 28))
 
-        // Ears behind the head: stepped "pixel" silhouettes with a cyan band, pivoting at the bottom.
-        let earPts: [(CGFloat, CGFloat)] = [(0, 10), (0, 5), (3, 5), (3, 0), (6, 0), (6, 2.5), (9, 2.5), (9, 7.5), (12, 7.5), (12, 10)]
+        // Ears behind the head, pivoting at the bottom.
         for (i, ear) in ears.enumerated() {
             let mirrored = i == 1
-            let pts = mirrored ? earPts.map { (12 - $0.0, $0.1) } : earPts
-            let g = gradient([(0x20272B, 1, 0), (0x35DFF2, 1, 0.44), (0x080A0D, 1, 0.52)], mirrored: mirrored)
-            ear.colors = g.colors; ear.locations = g.locations; ear.startPoint = g.startPoint; ear.endPoint = g.endPoint
-            let mask = CAShapeLayer(); mask.path = path(pts); mask.frame = CGRect(x: 0, y: 0, width: 12, height: 10)
-            ear.mask = mask
             place(ear, in: body, CGRect(x: mirrored ? 29 : 3, y: -7, width: 12, height: 10), anchor: CGPoint(x: 0.5, y: 1))
-            // Neon fringe of the CSS drop-shadow filter: a cyan edge on the left, magenta on the right.
-            // (A layer shadow would be clipped by the mask, so it's an outline layer inside the ear.)
-            ear.mask = nil
-            let fill = CAShapeLayer(); fill.path = path(pts); fill.frame = ear.bounds
-            let outline = CAShapeLayer()
-            outline.path = path(pts)
-            outline.frame = ear.bounds
-            outline.fillColor = nil
-            outline.strokeColor = cg(mirrored ? 0xFF8BE6 : 0x94F5FF, 0.6)
-            outline.lineWidth = 1
-            let paint = CAGradientLayer()
-            paint.colors = ear.colors; paint.locations = ear.locations; paint.startPoint = ear.startPoint; paint.endPoint = ear.endPoint
-            paint.frame = ear.bounds
-            paint.mask = fill
-            ear.colors = nil
-            ear.addSublayer(paint)
-            ear.addSublayer(outline)
+            let shape = earPath(mirrored: mirrored)
+            let fill = CAShapeLayer(); fill.path = shape; fill.frame = ear.bounds
+            let g = paint(skin.earFill, mirrored: mirrored)
+            g.mask = fill
+            place(g, in: ear, ear.bounds)
+            // Neon: a cyan fringe on the left ear, magenta on the right (the CSS drop-shadow filter).
+            let stroke = skin.neon ? CatSkin.Stroke.solid(mirrored ? 0xFF8BE6 : 0x94F5FF, 0.6) : skin.earStroke
+            outline(ear, shape, ear.bounds, stroke, width: skin.earStrokeWidth, mirrored: mirrored)
         }
 
-        // Offset "shadows" of the CSS filter + box-shadow, behind the head.
         let headRect = CGRect(x: 0, y: 0, width: 44, height: 28)
-        for (dx, dy, color, alpha) in [(3.0, 3.0, 0x000000, 0.3), (0, 2, 0x164A55, 1), (-1, 0, 0x3CEDFF, 0.24), (1, 0, 0xFF41D6, 0.18)]
-            as [(CGFloat, CGFloat, UInt32, CGFloat)] {
-            let s = rect(body, headRect.offsetBy(dx: dx, dy: dy), cg(color, alpha), radius: 9)
-            if color == 0x164A55 {   // soft cyan glow around the whole head
-                s.shadowColor = cg(0x41E5FF); s.shadowOpacity = 0.18; s.shadowRadius = 4; s.shadowOffset = .zero
+        if skin.neon {
+            // Offset "shadows" of the CSS filter + box-shadow, behind the head.
+            for (dx, dy, color, alpha) in [(3.0, 3.0, 0x000000, 0.3), (0, 2, 0x164A55, 1), (-1, 0, 0x3CEDFF, 0.24), (1, 0, 0xFF41D6, 0.18)]
+                as [(CGFloat, CGFloat, UInt32, CGFloat)] {
+                let s = rect(body, headRect.offsetBy(dx: dx, dy: dy), cg(color, alpha), radius: 9)
+                if color == 0x164A55 {   // soft cyan glow around the whole head
+                    s.shadowColor = cg(0x41E5FF); s.shadowOpacity = 0.18; s.shadowRadius = 4; s.shadowOffset = .zero
+                }
             }
+        } else {
+            // A soft drop shadow under the metal shell.
+            let s = rect(body, headRect, cg(0x000000), radius: 9)
+            s.shadowColor = cg(0x000000); s.shadowOpacity = 0.4; s.shadowRadius = 1.5; s.shadowOffset = CGSize(width: 0, height: 2)
         }
 
-        // Head: dark glass, cyan rim, magenta scan stripe, inner highlight and shade, glitch slices.
-        let head = gradient([(0x252D32, 1, 0), (0x111619, 1, 0.18), (0x176574, 1, 0.70), (0x08090D, 1, 0.78)])
+        let head = paint(skin.headFill)
         head.cornerRadius = 9
         head.masksToBounds = true
-        head.borderWidth = 1
-        head.borderColor = cg(0x94F5FF, 0.95)
         place(head, in: body, headRect)
-        _ = rect(head, CGRect(x: 29.9, y: 0, width: 1.8, height: 28), cg(0xFF3AD2, 0.24))
-        _ = rect(head, CGRect(x: 1, y: 0, width: 2, height: 28), cg(0x80F0FF, 0.2))
-        _ = rect(head, CGRect(x: 41, y: 0, width: 3, height: 28), cg(0x000000, 0.55))
-        _ = rect(head, CGRect(x: 0, y: 25, width: 41, height: 3), cg(0x000000, 0.55))
-        place(glitchA, in: head, CGRect(x: -8.8, y: 7, width: 30.8, height: 2))
-        glitchA.backgroundColor = cg(0x35F1FF)
-        _ = rect(glitchA, CGRect(x: 8, y: 8, width: 30.8, height: 2), cg(0xFF3BD4))
-        place(glitchB, in: head, CGRect(x: 29.2, y: 20, width: 18.5, height: 3))
-        glitchB.backgroundColor = cg(0xFF3BD4)
-        for g in [glitchA, glitchB] { g.opacity = 0 }
+        if skin.neon {
+            // Magenta scan stripe, inner highlight and shade, glitch slices.
+            _ = rect(head, CGRect(x: 29.9, y: 0, width: 1.8, height: 28), cg(0xFF3AD2, 0.24))
+            _ = rect(head, CGRect(x: 1, y: 0, width: 2, height: 28), cg(0x80F0FF, 0.2))
+            _ = rect(head, CGRect(x: 41, y: 0, width: 3, height: 28), cg(0x000000, 0.55))
+            _ = rect(head, CGRect(x: 0, y: 25, width: 41, height: 3), cg(0x000000, 0.55))
+            place(glitchA, in: head, CGRect(x: -8.8, y: 7, width: 30.8, height: 2))
+            glitchA.backgroundColor = cg(0x35F1FF)
+            _ = rect(glitchA, CGRect(x: 8, y: 8, width: 30.8, height: 2), cg(0xFF3BD4))
+            place(glitchB, in: head, CGRect(x: 29.2, y: 20, width: 18.5, height: 3))
+            glitchB.backgroundColor = cg(0xFF3BD4)
+            for g in [glitchA, glitchB] { g.opacity = 0 }
+        } else {
+            // Polished metal: a light sheen along the top, a shade along the bottom.
+            let sheen = CAGradientLayer()
+            sheen.colors = [cg(0xDDD5FF, 0.19), cg(0xDDD5FF, 0)]
+            sheen.frame = CGRect(x: 0, y: 0, width: 44, height: 3)
+            head.addSublayer(sheen)
+            let shade = CAGradientLayer()
+            shade.colors = [cg(0x000000, 0), cg(0x000000, 0.47)]
+            shade.frame = CGRect(x: 0, y: 23, width: 44, height: 5)
+            head.addSublayer(shade)
+        }
+        let w = skin.headStrokeWidth
+        outline(body, CGPath(roundedRect: headRect.insetBy(dx: w / 2, dy: w / 2), cornerWidth: 9 - w / 2, cornerHeight: 9 - w / 2, transform: nil),
+                headRect, skin.headStroke, width: w)
 
         // Eyes: clipped boxes with glowing pill pupils.
         place(eyesGroup, in: body, headRect)
@@ -202,19 +325,20 @@ final class CatNSView: NSView {
             let p = pupils[i]
             p.cornerRadius = 3.5
             p.shadowOffset = .zero
-            p.shadowRadius = 2.5
-            p.shadowOpacity = 0.9
+            p.shadowRadius = skin.pupilGlow.radius
+            p.shadowOpacity = skin.pupilGlow.opacity
             place(p, in: pupilMoves[i], CGRect(x: 1.5, y: 1, width: 7, height: 10))
         }
 
-        // Muzzle: stepped pink nose and a tiny "w" mouth.
+        // Muzzle: stepped nose and a tiny "w" mouth.
         place(muzzle, in: body, CGRect(x: 18, y: 16, width: 8, height: 6))
         let nose = CAShapeLayer()
         nose.path = path([(0, 0), (4, 0), (4, 2), (3, 2), (3, 3), (1, 3), (1, 2), (0, 2)])
-        nose.fillColor = cg(0xFF45D5)
+        nose.fillColor = cg(skin.nose)
+        if let stroke = skin.noseStroke { nose.strokeColor = cg(stroke); nose.lineWidth = 0.5 }
         place(nose, in: muzzle, CGRect(x: 2, y: 0, width: 4, height: 3))
         for (x, deg) in [(1.0, 24.0), (3, -24)] as [(CGFloat, CGFloat)] {
-            let m = rect(muzzle, CGRect(x: x, y: 4, width: 4, height: 1), cg(0x8A8795))
+            let m = rect(muzzle, CGRect(x: x, y: 4, width: 4, height: 1), cg(skin.mouth), radius: skin.neon ? 0 : 0.5)
             m.transform = CATransform3DMakeRotation(deg * .pi / 180, 0, 0, 1)
         }
 
@@ -224,7 +348,7 @@ final class CatNSView: NSView {
             w.opacity = 0.65
             for (y, deg) in [(1.0, 10.0), (5, -10)] as [(CGFloat, CGFloat)] {
                 let line = CALayer()
-                line.backgroundColor = cg(0x7AEAF5)
+                line.backgroundColor = cg(skin.whiskers)
                 line.cornerRadius = 0.5
                 let anchor = CGPoint(x: i == 0 ? 1 : 0, y: 0.5)
                 place(line, in: w, CGRect(x: i == 0 ? 0 : 1, y: y, width: 8, height: 1), anchor: anchor)
@@ -235,27 +359,50 @@ final class CatNSView: NSView {
         // Paws (hidden unless the mood uses them), pivoting at the top.
         for (i, paw) in paws.enumerated() {
             place(paw, in: body, CGRect(x: i == 0 ? 5 : 29, y: 23, width: 10, height: 11), anchor: CGPoint(x: 0.5, y: 0))
-            _ = rect(paw, CGRect(x: 2, y: 2, width: 10, height: 11), cg(0xFF39D3, 0.28), radius: 5)
-            let pad = gradient([(0x263136, 1, 0), (0x176C79, 1, 0.58), (0x08090D, 1, 0.72)])
+            let shadowOffset: CGFloat = skin.neon ? 2 : 0.5
+            _ = rect(paw, CGRect(x: skin.neon ? 2 : 0, y: shadowOffset, width: 10, height: 11), cg(skin.pawShadow.0, skin.pawShadow.1), radius: 5)
+            let pad = paint(skin.pawFill)
             pad.cornerRadius = 5
             pad.masksToBounds = true
-            pad.borderWidth = 1
-            pad.borderColor = cg(0x59E5F6, 0.45)
             place(pad, in: paw, CGRect(x: 0, y: 0, width: 10, height: 11))
-            let bean = rect(paw, CGRect(x: 1, y: 6, width: 6, height: 4), cg(0x10191C), radius: 2)
-            bean.borderWidth = 1
-            bean.borderColor = cg(0x4DEAFF)
-            for x in [3.0, 5.0] as [CGFloat] { _ = rect(paw, CGRect(x: x, y: 7, width: 1, height: 2), cg(0xFF58D8)) }
+            outline(paw, CGPath(roundedRect: CGRect(x: 0.25, y: 0.25, width: 9.5, height: 10.5), cornerWidth: 4.75, cornerHeight: 4.75, transform: nil),
+                    CGRect(x: 0, y: 0, width: 10, height: 11), skin.pawStroke, width: skin.neon ? 1 : 0.5)
+            let bean = rect(paw, CGRect(x: 1, y: 6, width: 6, height: 4), cg(skin.bean), radius: 2)
+            bean.borderWidth = skin.neon ? 1 : 0.5
+            bean.borderColor = cg(skin.beanStroke)
+            for x in [3.0, 5.0] as [CGFloat] { _ = rect(paw, CGRect(x: x, y: 7, width: 1, height: 2), cg(skin.toes), radius: skin.neon ? 0 : 0.5) }
             paw.opacity = 0
         }
+    }
+
+    /// Ear silhouette in its 12×10 box: stepped pixels (neon) or a soft rounded point (chrome).
+    private func earPath(mirrored: Bool) -> CGPath {
+        let p = CGMutablePath()
+        let x: (CGFloat) -> CGFloat = { mirrored ? 12 - $0 : $0 }
+        switch skin.ears {
+        case .stepped:
+            let pts: [(CGFloat, CGFloat)] = [(0, 10), (0, 5), (3, 5), (3, 0), (6, 0), (6, 2.5), (9, 2.5), (9, 7.5), (12, 7.5), (12, 10)]
+            p.addLines(between: pts.map { CGPoint(x: x($0.0), y: $0.1) })
+        case .soft:
+            // Figma "Мягкое ушко" (48×40 at ×4).
+            let s: CGFloat = 0.25
+            func pt(_ a: CGFloat, _ b: CGFloat) -> CGPoint { CGPoint(x: x(a * s), y: b * s) }
+            p.move(to: pt(0, 40))
+            p.addCurve(to: pt(11.52, 4), control1: pt(0, 28.8), control2: pt(5.76, 11.2))
+            p.addCurve(to: pt(18.72, 0), control1: pt(13.92, 1), control2: pt(16.32, 0))
+            p.addCurve(to: pt(26.4, 5.6), control1: pt(22.08, 0), control2: pt(24, 2.2))
+            p.addCurve(to: pt(48, 40), control1: pt(32.64, 14.4), control2: pt(41.76, 28.4))
+        }
+        p.closeSubpath()
+        return p
     }
 
     // MARK: Still image (snapshots)
 
     /// The cat's resting pose for a mood, as an image (for ImageRenderer-based snapshots).
-    static func still(mood: PetMood, pointsPerCSSPixel k: CGFloat) -> NSImage {
+    static func still(mood: PetMood, pointsPerCSSPixel k: CGFloat, skin: CatSkin? = nil) -> NSImage {
         let size = NSSize(width: (48 * k).rounded(.up) + 4, height: (44 * k).rounded(.up) + 4)
-        let view = CatNSView(pointsPerCSSPixel: k)
+        let view = CatNSView(pointsPerCSSPixel: k, skin: skin)
         view.frame = NSRect(origin: .zero, size: size)
         view.layout()
         view.update(mood: mood, gaze: 0)
@@ -283,7 +430,7 @@ final class CatNSView: NSView {
         // Resting values; the mood's animations play on top of them.
         for l in [body, muzzle] + eyes + pupilMoves + pupils + whiskers + paws { l.transform = CATransform3DIdentity }
         for e in ears { e.transform = CATransform3DIdentity }
-        let color = cg(CatStyle.pupil(mood))
+        let color = cg(skin.pupil(mood))
         for p in pupils {
             p.backgroundColor = color
             p.shadowColor = color
@@ -303,12 +450,14 @@ final class CatNSView: NSView {
             if mood == .sleeping { applyStatic(CatMotion.sleepPose) }
             return
         }
-        // Always: the occasional signal flicker and glitch slices.
-        animate(stage, CatMotion.flicker, scalar: "opacity", property: "op", fallback: 1)
-        animate(glitchA, CatMotion.glitchA, scalar: "opacity", property: "op", fallback: 0)
-        animate(glitchA, CatMotion.glitchA, key: "slide")
-        animate(glitchB, CatMotion.glitchB, scalar: "opacity", property: "op", fallback: 0)
-        animate(glitchB, CatMotion.glitchB, key: "slide")
+        // Neon: the occasional signal flicker and glitch slices.
+        if skin.neon {
+            animate(stage, CatMotion.flicker, scalar: "opacity", property: "op", fallback: 1)
+            animate(glitchA, CatMotion.glitchA, scalar: "opacity", property: "op", fallback: 0)
+            animate(glitchA, CatMotion.glitchA, key: "slide")
+            animate(glitchB, CatMotion.glitchB, scalar: "opacity", property: "op", fallback: 0)
+            animate(glitchB, CatMotion.glitchB, key: "slide")
+        }
 
         for spec in CatMotion.specs(for: mood) {
             let targets: [CALayer]

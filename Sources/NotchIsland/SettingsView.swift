@@ -103,6 +103,7 @@ struct PeekSettings: View {
                 }
             }
             Section("Pet") {
+                CatSkinPicker(selection: $settings.catSkin)
                 Toggle("Всегда виден справа от выреза", isOn: $settings.petAlwaysVisible)
                 Toggle("Засыпает ночью (с 1 до 6)", isOn: $settings.petSleepsAtNight)
                     .disabled(!settings.petAlwaysVisible)
@@ -473,5 +474,42 @@ private struct AboutSettings: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+/// Looks of the cat as tiles with a live preview (each tile shows its own skin).
+struct CatSkinPicker: View {
+    @Binding var selection: String
+
+    var body: some View {
+        HStack(spacing: 12) {
+            ForEach(CatSkin.all) { skin in
+                Button { selection = skin.id } label: {
+                    VStack(spacing: 6) {
+                        CatSkinPreview(skinID: skin.id)
+                            .frame(width: 96, height: 64)
+                            .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Color.black))
+                            .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                .strokeBorder(selection == skin.id ? Color.accentColor : .clear, lineWidth: 2))
+                        Text(skin.title).font(.callout)
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Вид кота: \(skin.title)")
+                .accessibilityAddTraits(selection == skin.id ? .isSelected : [])
+            }
+            Spacer()
+        }
+        .padding(.vertical, 4)
+    }
+}
+
+/// A still cat in a given skin (the island's own cat follows the setting).
+private struct CatSkinPreview: View {
+    let skinID: String
+
+    var body: some View {
+        Image(nsImage: CatNSView.still(mood: .idle, pointsPerCSSPixel: 1.25, skin: CatSkin.named(skinID)))
     }
 }
