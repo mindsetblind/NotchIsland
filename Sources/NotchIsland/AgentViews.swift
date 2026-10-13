@@ -344,10 +344,61 @@ struct AgentsTab: View {
         .onAppear { installed = ClaudeHooks.isInstalled }
     }
 
-    private func faceTile(_ mood: PetMood) -> some View {
-        RoundedRectangle(cornerRadius: 14, style: .continuous).fill(.white.opacity(0.08))
+    /// The big cat here stays calm whatever the agents do (their state is in the list next to it);
+    /// it only reacts when you interact with it.
+    private func faceTile(_: PetMood) -> some View {
+        InteractivePet(mood: .idle) {
+            model.setHovering(false)   // the island steps back so the pet can climb out of the notch
+            PetPanelController.shared.open()
+        }
             .frame(width: IslandModel.artworkSize, height: IslandModel.artworkSize)
-            .overlay(PetFace(mood: mood, size: 34))
+    }
+}
+
+/// The big cat on the Agents tab: it watches the cursor, enjoys being petted (click), dances when
+/// petted a few times in a row, and a double click calls the pet assistant (like ⌥⇧Space).
+private struct InteractivePet: View {
+    let mood: PetMood
+    let summon: () -> Void
+    @State private var gaze: CGFloat?
+    @State private var reaction: PetMood?
+    @State private var strokes: [Date] = []
+    @State private var resetTask: Task<Void, Never>?
+
+    var body: some View {
+        GeometryReader { geo in
+            PetFace(mood: reaction ?? mood, size: 34, gaze: gaze)
+                .frame(width: geo.size.width, height: geo.size.height)
+                .contentShape(Rectangle())
+                .onContinuousHover { phase in
+                    switch phase {
+                    case .active(let p):
+                        let raw = (p.x - geo.size.width / 2) / (geo.size.width / 2)
+                        gaze = (max(-1, min(1, raw)) * 4).rounded() / 4
+                    case .ended:
+                        gaze = nil
+                    }
+                }
+                .onTapGesture(count: 2) { summon() }
+                .onTapGesture { pet() }
+                .help("Погладь кота · двойной клик — позвать pet (⌥⇧Space)")
+                .accessibilityLabel("Кот")
+                .accessibilityHint("Нажми, чтобы погладить; двойное нажатие зовёт помощника")
+        }
+    }
+
+    /// One stroke: a happy wave; four strokes within a few seconds: a little dance.
+    private func pet() {
+        let now = Date()
+        strokes = strokes.filter { now.timeIntervalSince($0) < 3 } + [now]
+        reaction = strokes.count >= 4 ? .dancing : .happy
+        resetTask?.cancel()
+        resetTask = Task { @MainActor in
+            try? await Task.sleep(for: .seconds(reaction == .dancing ? 3 : 1.8))
+            guard !Task.isCancelled else { return }
+            reaction = nil
+            strokes = []
+        }
     }
 }
 

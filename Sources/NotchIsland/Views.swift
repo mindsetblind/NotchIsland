@@ -522,11 +522,12 @@ struct DropZoneView: View {
         VStack(spacing: 0) {
             Color.clear.frame(height: model.notchSize.height)
             HStack(spacing: 12) {
-                DropTile(title: "Полка", hint: "Положить на полку") {
-                    Image(systemName: "tray.and.arrow.down.fill").resizable().scaledToFit().padding(7)
+                DropTile(title: "Полка", hint: "Покорми кота файлом") { targeted in
+                    // Mouth open while you carry the file; wide open when it's right above.
+                    PetView(mood: targeted ? .gaping : .hungry, size: 26)
                 } onDrop: { model.addToShelf($0) }
 
-                DropTile(title: "AirDrop", hint: "Отправить по AirDrop") {
+                DropTile(title: "AirDrop", hint: "Отправить по AirDrop") { _ in
                     if let icon = Self.airDropIcon {
                         Image(nsImage: icon).resizable()
                     } else {
@@ -545,7 +546,7 @@ struct DropZoneView: View {
 private struct DropTile<Icon: View>: View {
     let title: String
     let hint: String
-    @ViewBuilder var icon: Icon
+    @ViewBuilder var icon: (_ targeted: Bool) -> Icon
     let onDrop: ([NSItemProvider]) -> Void
     @State private var targeted = false
 
@@ -556,7 +557,7 @@ private struct DropTile<Icon: View>: View {
             RoundedRectangle(cornerRadius: 18, style: .continuous)
                 .strokeBorder(.white.opacity(targeted ? 0.85 : 0.28), style: StrokeStyle(lineWidth: 1.5, dash: [6, 5]))
             HStack(spacing: 12) {
-                icon
+                icon(targeted)
                     .frame(width: 42, height: 42)
                     .scaleEffect(targeted ? 1.12 : 1)
                 VStack(alignment: .leading, spacing: 3) {

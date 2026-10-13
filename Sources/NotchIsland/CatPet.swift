@@ -51,7 +51,13 @@ struct CatSkin: Identifiable, Equatable {
 
     static func == (a: CatSkin, b: CatSkin) -> Bool { a.id == b.id }
 
-    func pupil(_ mood: PetMood) -> UInt32 { pupils[mood] ?? pupils[.idle] ?? 0xFFFFFF }
+    func pupil(_ mood: PetMood) -> UInt32 {
+        switch mood {
+        case .hungry, .gaping: return pupils[.attention] ?? 0xFFFFFF   // eager
+        case .munching, .full: return pupils[.happy] ?? 0xFFFFFF       // content
+        default: return pupils[mood] ?? pupils[.idle] ?? 0xFFFFFF
+        }
+    }
 
     /// From Figma Make: dark glass, cyan rim, magenta scan stripe, stepped pixel ears.
     static let neonCat = CatSkin(
@@ -100,6 +106,9 @@ final class CatNSView: NSView {
     private var pupilMoves = [CALayer(), CALayer()]
     private var pupils = [CALayer(), CALayer()]
     private var muzzle = CALayer()
+    private var mouthLines = CALayer()   // the closed "w"
+    private var mouthOpen = CALayer()    // open mouth (hungry / munching)
+    private var cheeks = [CALayer(), CALayer()]
     private var whiskers = [CALayer(), CALayer()]
     private var paws = [CALayer(), CALayer()]
     private var glitchA = CALayer(), glitchB = CALayer()
@@ -247,6 +256,7 @@ final class CatNSView: NSView {
         stage = CALayer(); body = CALayer(); ears = [CALayer(), CALayer()]; eyesGroup = CALayer()
         eyes = [CALayer(), CALayer()]; pupilMoves = [CALayer(), CALayer()]; pupils = [CALayer(), CALayer()]
         muzzle = CALayer(); whiskers = [CALayer(), CALayer()]; paws = [CALayer(), CALayer()]
+        mouthLines = CALayer(); mouthOpen = CALayer(); cheeks = [CALayer(), CALayer()]
         glitchA = CALayer(); glitchB = CALayer()
 
         stage.isGeometryFlipped = true
@@ -283,6 +293,21 @@ final class CatNSView: NSView {
             // A soft drop shadow under the metal shell.
             let s = rect(body, headRect, cg(0x000000), radius: 9)
             s.shadowColor = cg(0x000000); s.shadowOpacity = 0.4; s.shadowRadius = 1.5; s.shadowOffset = CGSize(width: 0, height: 2)
+        }
+
+        // Hamster cheeks: the lower sides of the head bulge out (same material and rim as the head),
+        // drawn behind it so only the part sticking out shows. Hidden unless the mouth is full.
+        for (i, cheek) in cheeks.enumerated() {
+            let r = CGRect(x: i == 0 ? -3.5 : 33.5, y: 13.5, width: 14, height: 13)
+            place(cheek, in: body, r)
+            let shape = CGPath(ellipseIn: CGRect(origin: .zero, size: r.size), transform: nil)
+            let fill = CAShapeLayer(); fill.path = shape; fill.frame = cheek.bounds
+            let g = paint(skin.headFill, mirrored: i == 1)
+            g.mask = fill
+            place(g, in: cheek, cheek.bounds)
+            outline(cheek, CGPath(ellipseIn: CGRect(origin: .zero, size: r.size).insetBy(dx: skin.headStrokeWidth / 2, dy: skin.headStrokeWidth / 2), transform: nil),
+                    cheek.bounds, skin.headStroke, width: skin.headStrokeWidth, mirrored: i == 1)
+            cheek.opacity = 0
         }
 
         let head = paint(skin.headFill)
@@ -332,13 +357,35 @@ final class CatNSView: NSView {
 
         // Muzzle: stepped nose and a tiny "w" mouth.
         place(muzzle, in: body, CGRect(x: 18, y: 16, width: 8, height: 6))
+        // Open mouth: a dark oval with a pink tongue, opening downwards from under the nose.
+        mouthOpen.backgroundColor = cg(0x0D0912)
+        // Drawn at its widest (a cartoon jaw-drop, half the face); the moods scale it down.
+        mouthOpen.cornerRadius = 7
+        mouthOpen.masksToBounds = true
+        mouthOpen.borderWidth = 0.6
+        mouthOpen.borderColor = cg(skin.mouth, 0.9)
+        place(mouthOpen, in: muzzle, CGRect(x: -7, y: 2.6, width: 22, height: 14), anchor: CGPoint(x: 0.5, y: 0))
+        let throat = CAGradientLayer()   // depth: darker towards the back
+        throat.colors = [cg(0x000000, 0.9), cg(0x2A1020, 1)]
+        throat.frame = CGRect(x: 0, y: 0, width: 22, height: 14)
+        mouthOpen.addSublayer(throat)
+        _ = rect(mouthOpen, CGRect(x: 4.5, y: 8, width: 13, height: 7.5), cg(0xFF7AB8), radius: 4.5)      // tongue
+        _ = rect(mouthOpen, CGRect(x: 10.75, y: 9, width: 0.5, height: 3.5), cg(0xD94F92), radius: 0.25) // its groove
+        for x in [5.5, 15.1] as [CGFloat] {   // two little fangs
+            let fang = CAShapeLayer()
+            fang.path = path([(0, 0), (1.4, 0), (0.7, 2.2)])
+            fang.fillColor = cg(0xF4F1FF)
+            place(fang, in: mouthOpen, CGRect(x: x, y: 0, width: 1.4, height: 2.2))
+        }
+        mouthOpen.opacity = 0
+        place(mouthLines, in: muzzle, CGRect(x: 0, y: 0, width: 8, height: 6))
         let nose = CAShapeLayer()
         nose.path = path([(0, 0), (4, 0), (4, 2), (3, 2), (3, 3), (1, 3), (1, 2), (0, 2)])
         nose.fillColor = cg(skin.nose)
         if let stroke = skin.noseStroke { nose.strokeColor = cg(stroke); nose.lineWidth = 0.5 }
         place(nose, in: muzzle, CGRect(x: 2, y: 0, width: 4, height: 3))
         for (x, deg) in [(1.0, 24.0), (3, -24)] as [(CGFloat, CGFloat)] {
-            let m = rect(muzzle, CGRect(x: x, y: 4, width: 4, height: 1), cg(skin.mouth), radius: skin.neon ? 0 : 0.5)
+            let m = rect(mouthLines, CGRect(x: x, y: 4, width: 4, height: 1), cg(skin.mouth), radius: skin.neon ? 0 : 0.5)
             m.transform = CATransform3DMakeRotation(deg * .pi / 180, 0, 0, 1)
         }
 
@@ -420,7 +467,7 @@ final class CatNSView: NSView {
     // MARK: Moods
 
     private var allLayers: [CALayer] {
-        [stage, body, glitchA, glitchB, muzzle] + ears + eyes + pupilMoves + pupils + whiskers + paws
+        [stage, body, glitchA, glitchB, muzzle, mouthLines, mouthOpen] + ears + eyes + pupilMoves + pupils + whiskers + paws + cheeks
     }
 
     private func configure(_ mood: PetMood) {
@@ -437,6 +484,11 @@ final class CatNSView: NSView {
             p.opacity = mood == .sleeping ? 0 : 1
         }
         for w in whiskers { w.opacity = 0.65 }
+        for l in [mouthLines, mouthOpen] + cheeks { l.transform = CATransform3DIdentity }
+        let mouthFull = [PetMood.hungry, .gaping, .munching].contains(mood)
+        mouthOpen.opacity = mouthFull ? 1 : 0
+        mouthLines.opacity = mouthFull ? 0 : 1
+        for c in cheeks { c.opacity = mood == .full || mood == .munching ? 1 : 0 }
         for p in paws { p.opacity = 0 }
         if mood == .sleeping {
             for p in paws { p.opacity = 1; p.transform = CATransform3DMakeTranslation(0, 3, 0) }
@@ -471,6 +523,8 @@ final class CatNSView: NSView {
             case .whiskers: targets = whiskers
             case .pawLeft: targets = [paws[0]]
             case .pawRight: targets = [paws[1]]
+            case .mouthOpen: targets = [mouthOpen]
+            case .cheeks: targets = cheeks
             }
             for t in targets {
                 if spec.frames.properties.contains(where: { $0 != "op" }) {
@@ -552,7 +606,7 @@ final class CatNSView: NSView {
 // MARK: - Motion (the CSS @keyframes from Figma Make, one per part and mood)
 
 enum CatMotion {
-    enum Part { case body, earLeft, earRight, eyes, pupils, muzzle, whiskers, pawLeft, pawRight }
+    enum Part { case body, earLeft, earRight, eyes, pupils, muzzle, whiskers, pawLeft, pawRight, mouthOpen, cheeks }
     struct Spec { let part: Part; let frames: CSSKeyframes }
 
     typealias K = CSSKeyframes
@@ -628,6 +682,44 @@ enum CatMotion {
                 Spec(part: .body, frames: K(duration: 3.4, timing: .steps(6), groups: [([0, 1], ["ty": 3, "sx": 1.08, "sy": 0.86, "rot": -2]), ([0.5], ["ty": 2, "sx": 1.12, "sy": 0.9, "rot": 2])])),
                 Spec(part: .eyes, frames: K(duration: 3.4, timing: .easeInOut, groups: [([0, 1], ["ty": 4, "sx": 1.05, "sy": 0.14]), ([0.5], ["ty": 3, "sx": 1.05, "sy": 0.18])])),
                 Spec(part: .whiskers, frames: K(duration: 3.4, timing: .easeInOut, groups: [([0, 1], ["op": 0.35, "ty": 1]), ([0.5], ["op": 0.55, "ty": 2])])),
+                Spec(part: .earLeft, frames: ear), Spec(part: .earRight, frames: ear),
+            ]
+        case .hungry:
+            // "Aaa…": mouth opens and closes a little, leaning in, ears up, eyes wide.
+            let ear = K(duration: 1.1, timing: .easeInOut, groups: [([0, 1], ["rot": -8]), ([0.5], ["rot": -14])])
+            return [
+                Spec(part: .body, frames: K(duration: 1.1, timing: .easeInOut, groups: [([0, 1], ["ty": 0, "rx": 0]), ([0.5], ["ty": -1.5, "rx": -8, "sy": 1.04])])),
+                Spec(part: .mouthOpen, frames: K(duration: 1.1, timing: .easeInOut, groups: [([0, 1], ["sx": 0.32, "sy": 0.3]), ([0.5], ["sx": 0.38, "sy": 0.48])])),
+                Spec(part: .eyes, frames: K(duration: 1.1, timing: .easeInOut, groups: [([0, 1], ["sx": 1.05, "sy": 1.1]), ([0.5], ["sx": 1.1, "sy": 1.18])])),
+                Spec(part: .earLeft, frames: ear), Spec(part: .earRight, frames: ear),
+            ]
+        case .gaping:
+            // The treat is right there: mouth wide open, trembling with excitement, paws up.
+            let ear = K(duration: 0.24, timing: .steps(2), groups: [([0, 1], ["rot": -16]), ([0.5], ["rot": -20])])
+            return [
+                Spec(part: .body, frames: K(duration: 0.24, timing: .steps(2), groups: [([0, 1], ["ty": -2, "sx": 0.97, "sy": 1.14]), ([0.5], ["ty": -2.6, "sx": 0.97, "sy": 1.16, "rot": 1])])),
+                Spec(part: .mouthOpen, frames: K(duration: 0.24, timing: .linear, groups: [([0, 1], ["sx": 1.0, "sy": 1.0]), ([0.5], ["sx": 1.04, "sy": 1.06])])),
+                Spec(part: .eyes, frames: K(duration: 0.24, timing: .linear, groups: [([0, 1], ["sx": 1.12, "sy": 1.22])])),
+                Spec(part: .pawLeft, frames: K(duration: 0.24, timing: .steps(2), groups: [([0, 1], ["op": 1, "tx": -3, "ty": -1, "rot": 22])])),
+                Spec(part: .pawRight, frames: K(duration: 0.24, timing: .steps(2), groups: [([0, 1], ["op": 1, "tx": 3, "ty": -1, "rot": -22])])),
+                Spec(part: .earLeft, frames: ear), Spec(part: .earRight, frames: ear),
+            ]
+        case .munching:
+            // Chomp chomp: the mouth snaps shut and open, cheeks fill up, the head bobs with each bite.
+            return [
+                Spec(part: .mouthOpen, frames: K(duration: 0.36, timing: .easeInOut, groups: [([0, 1], ["sx": 0.55, "sy": 0.62]), ([0.5], ["sx": 0.45, "sy": 0.04])])),
+                Spec(part: .cheeks, frames: K(duration: 0.36, timing: .easeInOut, groups: [([0, 1], ["s": 0.7]), ([0.5], ["s": 1.0])])),
+                Spec(part: .body, frames: K(duration: 0.36, timing: .easeInOut, groups: [([0, 1], ["ty": 0]), ([0.5], ["ty": 1, "sy": 0.97, "sx": 1.03])])),
+                Spec(part: .eyes, frames: K(duration: 0.36, timing: .easeInOut, groups: [([0, 1], ["sy": 1]), ([0.5], ["sy": 0.45, "ty": 1])])),
+            ]
+        case .full:
+            // Sitting with a full mouth: puffed cheeks, a slow chew every few seconds, blinking.
+            let ear = K(duration: 3.2, timing: .steps(4), groups: [([0, 0.65, 1], ["rot": 0]), ([0.72], ["rot": -10]), ([0.79], ["rot": 4])])
+            return [
+                Spec(part: .body, frames: K(duration: 3.2, timing: .easeInOut, [(0, ["ty": 0]), (0.5, ["ty": -0.8]), (1, ["ty": 0])])),
+                Spec(part: .cheeks, frames: K(duration: 2.6, timing: .easeInOut, groups: [
+                    ([0, 0.6, 0.72, 0.84, 1], ["s": 1]), ([0.66, 0.78], ["s": 1.08, "sy": 0.9])])),
+                Spec(part: .eyes, frames: blink),
                 Spec(part: .earLeft, frames: ear), Spec(part: .earRight, frames: ear),
             ]
         case .dancing:

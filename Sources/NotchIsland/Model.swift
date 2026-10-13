@@ -320,14 +320,27 @@ final class IslandModel: ObservableObject {
 
     var petMood: PetMood {
         if let mood = petAssistant.earMood { return mood }
+        // Shelf story: mouth open while a file is dragged, chewing when it lands, full cheeks while it sits there.
+        if fileDragActive { return .hungry }
+        if Date() < munchUntil { return .munching }
         if claude.isAnyWaiting { return .attention }
         if claude.isAnyWorking { return .working }
         // Only a short burst of joy: a finished Claude session stays "done" for minutes, and a face
         // frozen in ^ ^ for that long stops blinking, dancing and sleeping.
         if Date() < happyUntil { return .happy }
-        if isSleepy { return .sleeping }
+        // Music beats a full mouth (the shelf may stay full for days); a full mouth beats a nap.
         if nowPlaying?.isPlaying == true { return .dancing }
+        if !shelf.isEmpty { return .full }
+        if isSleepy { return .sleeping }
         return .idle
+    }
+
+    /// The cat chews for a moment after a file lands on the shelf.
+    private var munchUntil = Date.distantPast
+    private func munch() {
+        munchUntil = Date().addingTimeInterval(1.5)
+        objectWillChange.send()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.55) { [weak self] in self?.objectWillChange.send() }
     }
 
     /// Nobody has touched the Mac for 5 minutes, or it's the middle of the night.
@@ -983,7 +996,7 @@ final class IslandModel: ObservableObject {
             self.setFileDrag(false)
             let new = urls.filter { !self.shelf.contains($0) }
             withAnimation(Self.spring) { self.shelf.append(contentsOf: new) }
-            if !new.isEmpty { self.selectTab(.shelf); self.cheer() }
+            if !new.isEmpty { self.selectTab(.shelf); self.munch() }
             self.saveShelf()
         }
     }
