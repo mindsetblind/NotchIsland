@@ -86,11 +86,13 @@ final class OpenAICompatibleBrain: PetBrain, @unchecked Sendable {
         defer { debugLog("pet: \(name) \(model) answered in \(String(format: "%.2f", Date().timeIntervalSince(started))) s") }
         let home = policy.home.path
         var messages: [[String: Any]] = [
-            ["role": "system", "content": ClaudeCodeBrain.systemPrompt(home: home, tools: "list_folder, spotlight_search, read_file") + Self.toolNote],
+            ["role": "system", "content": ClaudeCodeBrain.systemPrompt(home: home, tools: "list_folder, spotlight_search, read_file") + Self.toolNote
+                + "\nПути можно писать с ~ (это \(home))."],
             ["role": "user", "content": ClaudeCodeBrain.prompt(request, context: context)],
         ]
         // A handful of look-arounds at most; each round trip is a fraction of a second on Groq.
         for round in 0..<6 {
+            Self.fit(&messages)
             var body: [String: Any] = [
                 "model": model, "messages": messages, "tools": Self.tools, "temperature": 0.2,
                 "tool_choice": round == 5 ? ["type": "function", "function": ["name": "answer"]] as Any : "required" as Any,
@@ -186,7 +188,19 @@ final class OpenAICompatibleBrain: PetBrain, @unchecked Sendable {
         ]
     }()
 
+    /// Tool results are kept short: the free Groq tier allows ~8k tokens per minute for a whole request.
+    static let listLimit = 80, searchLimit = 25, readLimit = 1500, resultLimit = 3000
+
+    /// `/Users/me/Desktop/a.png` → `~/Desktop/a.png` (fewer tokens; paths with ~ are accepted back).
+    func short(_ path: String) -> String {
+        path.hasPrefix(policy.home.path + "/") ? "~" + path.dropFirst(policy.home.path.count) : path
+    }
+
     func run(_ name: String, _ args: [String: Any]) -> String {
+        String(runTool(name, args).prefix(Self.resultLimit))
+    }
+
+    private func runTool(_ name: String, _ args: [String: Any]) -> String {
         let fm = FileManager.default
         switch name {
         case "list_folder":
@@ -195,13 +209,18 @@ final class OpenAICompatibleBrain: PetBrain, @unchecked Sendable {
             guard let items = try? fm.contentsOfDirectory(at: url, includingPropertiesForKeys: keys, options: .skipsHiddenFiles) else {
                 return "Не получилось открыть папку."
             }
-            let df = ISO8601DateFormatter()
-            let lines = items.prefix(300).map { item -> String in
+            let df = DateFormatter()
+            df.dateFormat = "yyyy-MM-dd"
+            // Newest first: that's usually what a request is about.
+            let rows = items.map { item -> (String, Date) in
                 let v = try? item.resourceValues(forKeys: Set(keys))
-                let kind = v?.isDirectory == true ? "папка" : "\(v?.fileSize ?? 0) Б"
-                return "\(item.lastPathComponent)\t\(kind)\t\(v?.contentModificationDate.map(df.string) ?? "")"
-            }
-            return "\(url.path) — \(items.count) шт.\n" + lines.joined(separator: "\n")
+                let date = v?.contentModificationDate ?? .distantPast
+                let kind = v?.isDirectory == true ? "/" : " " + ByteCountFormatter.string(fromByteCount: Int64(v?.fileSize ?? 0), countStyle: .file)
+                return ("\(item.lastPathComponent)\(kind) \(df.string(from: date))", date)
+            }.sorted { $0.1 > $1.1 }
+            var out = "\(short(url.path)) — \(items.count) шт., сначала новые:\n" + rows.prefix(Self.listLimit).map(\.0).joined(separator: "\n")
+            if items.count > Self.listLimit { out += "\n…и ещё \(items.count - Self.listLimit). Чтобы найти нужное, используй spotlight_search." }
+            return out
         case "spotlight_search":
             guard let query = args["query"] as? String, !query.isEmpty else { return "Пустой запрос." }
             let folder = (args["folder"] as? String).flatMap(policy.resolve) ?? policy.home
@@ -215,16 +234,31 @@ final class OpenAICompatibleBrain: PetBrain, @unchecked Sendable {
             let data = out.fileHandleForReading.readDataToEndOfFile()
             p.waitUntilExit()
             let paths = String(decoding: data, as: UTF8.self).split(separator: "\n").map(String.init).filter { policy.resolve($0) != nil }
-            return paths.isEmpty ? "Ничего не найдено." : paths.prefix(60).joined(separator: "\n")
+            guard !paths.isEmpty else { return "Ничего не найдено." }
+            var result = paths.prefix(Self.searchLimit).map(short).joined(separator: "\n")
+            if paths.count > Self.searchLimit { result += "\n…и ещё \(paths.count - Self.searchLimit)" }
+            return result
         case "read_file":
             guard let url = (args["path"] as? String).flatMap(policy.resolve),
                   let handle = try? FileHandle(forReadingFrom: url) else { return "Не получилось прочитать." }
             defer { try? handle.close() }
-            let data = (try? handle.read(upToCount: 16_000)) ?? Data()
-            guard let text = String(data: data, encoding: .utf8) else { return "Это не текстовый файл." }
-            return String(text.prefix(4000))
+            let data = (try? handle.read(upToCount: 8_000)) ?? Data()
+            guard let text = String(data: data, encoding: .utf8) ?? String(data: data.dropLast(3), encoding: .utf8) else { return "Это не текстовый файл." }
+            return String(text.prefix(Self.readLimit))
         default:
             return "Нет такого инструмента."
+        }
+    }
+
+    /// Keeps the whole conversation under the budget by shortening the oldest tool results first.
+    static func fit(_ messages: inout [[String: Any]], maxCharacters: Int = 16_000) {
+        func total() -> Int { messages.reduce(0) { $0 + (($1["content"] as? String)?.count ?? 0) } }
+        var i = 0
+        while total() > maxCharacters, i < messages.count {
+            if messages[i]["role"] as? String == "tool", let c = messages[i]["content"] as? String, c.count > 200 {
+                messages[i]["content"] = String(c.prefix(200)) + "\n…(сокращено)"
+            }
+            i += 1
         }
     }
 }

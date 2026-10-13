@@ -493,7 +493,7 @@ final class PetAssistant: ObservableObject {
                 // "@Tag + words": let Claude pick from that playlist's own tracks.
                 var tracks: [PlaylistTrack] = []
                 if let source = context.music, let music = self.music {
-                    tracks = Array(((try? await music.tracks(source)) ?? []).prefix(300))
+                    tracks = Array(((try? await music.tracks(source)) ?? []).prefix(120))   // keeps the request small for Groq
                     if tracks.isEmpty {
                         // Spotify won't show what's inside (e.g. someone else's playlist): play it whole.
                         return self.showPlaying(try await music.play(source, nil))
