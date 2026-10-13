@@ -107,3 +107,11 @@ Client Secret не нужен (OAuth PKCE), токен хранится в Св�
 | `Sources/NotchIsland/CleaningMode.swift`, `Pomodoro.swift` | чистка экрана и клавиатуры, помидор |
 | `Sources/NotchIsland/Snapshots.swift` | снимки интерфейса и покадровая съёмка |
 | `Sources/NotchIsland/HotKey.swift`, `LoginItem.swift` | глобальные сочетания (Carbon), автозапуск |
+
+## Поделиться с другом
+
+```
+./package.sh
+```
+
+Соберёт `dist/NotchIsland.dmg`: универсальную версию (Apple Silicon и Intel, macOS 14+) без твоей картинки-заглушки и с файлом «Как открыть». Приложение не нотаризовано, поэтому при первом запуске нужно нажать «Всё равно открыть» в Системных настройках → Конфиденциальность и безопасность.
