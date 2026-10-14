@@ -311,7 +311,7 @@ struct PomodoroCompactView: View {
                         .font(.system(size: 12, weight: .semibold, design: .rounded).monospacedDigit())
                         .foregroundStyle(pomodoro.phase.color)
                     if model.showsPet {
-                        PetView(mood: model.petMood, size: 16, gaze: model.petGaze)
+                        PetView(mood: model.petMood, size: 16, gaze: model.petGaze, accessories: model.petAccessories)
                     }
                 }
             }

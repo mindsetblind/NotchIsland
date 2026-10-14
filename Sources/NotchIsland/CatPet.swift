@@ -51,6 +51,10 @@ struct CatSkin: Identifiable, Equatable {
 
     static func == (a: CatSkin, b: CatSkin) -> Bool { a.id == b.id }
 
+    /// Accessory trim colours: neon cyan/pink, chrome amber/violet.
+    var accent: UInt32 { neon ? 0x35DFF2 : 0xEDBE7C }
+    var accent2: UInt32 { neon ? 0xFF45D5 : 0xB998FF }
+
     func pupil(_ mood: PetMood) -> UInt32 {
         switch mood {
         case .hungry, .gaping: return pupils[.attention] ?? 0xFFFFFF   // eager
@@ -111,6 +115,8 @@ final class CatNSView: NSView {
     private var mouthLines = CALayer()   // the closed "w"
     private var mouthOpen = CALayer()    // open mouth (hungry / munching)
     private var cheeks = [CALayer(), CALayer()]
+    private var accessoryLayers: [CatAccessory: CALayer] = [:]
+    private var accessories: Set<CatAccessory> = []
     private var whiskers = [CALayer(), CALayer()]
     private var paws = [CALayer(), CALayer()]
     private var glitchA = CALayer(), glitchB = CALayer()
@@ -147,6 +153,7 @@ final class CatNSView: NSView {
         positionStage()
         if let mood { configure(mood) }
         eyesGroup.transform = CATransform3DMakeTranslation((gaze.isNaN ? 0 : gaze) * 2.5, 0, 0)
+        showAccessories(animated: false)
     }
 
     @objc private func motionPreferenceChanged() { if let mood { configure(mood) } }
@@ -167,7 +174,11 @@ final class CatNSView: NSView {
         CATransaction.commit()
     }
 
-    func update(mood: PetMood, gaze: CGFloat) {
+    func update(mood: PetMood, gaze: CGFloat, accessories: Set<CatAccessory> = []) {
+        if accessories != self.accessories {
+            self.accessories = accessories
+            showAccessories(animated: true)
+        }
         if gaze != self.gaze {
             self.gaze = gaze
             CATransaction.begin()
@@ -258,7 +269,7 @@ final class CatNSView: NSView {
         stage = CALayer(); body = CALayer(); ears = [CALayer(), CALayer()]; eyesGroup = CALayer()
         eyes = [CALayer(), CALayer()]; pupilMoves = [CALayer(), CALayer()]; pupils = [CALayer(), CALayer()]
         muzzle = CALayer(); whiskers = [CALayer(), CALayer()]; paws = [CALayer(), CALayer()]
-        mouthLines = CALayer(); mouthOpen = CALayer(); cheeks = [CALayer(), CALayer()]
+        mouthLines = CALayer(); mouthOpen = CALayer(); cheeks = [CALayer(), CALayer()]; accessoryLayers = [:]
         glitchA = CALayer(); glitchB = CALayer()
 
         stage.isGeometryFlipped = true
@@ -422,6 +433,115 @@ final class CatNSView: NSView {
             for x in [3.0, 5.0] as [CGFloat] { _ = rect(paw, CGRect(x: x, y: 7, width: 1, height: 2), cg(skin.toes), radius: skin.neon ? 0 : 0.5) }
             paw.opacity = 0
         }
+        buildAccessories()
+        showAccessories(animated: false)
+    }
+
+    // MARK: Accessories (CSS pixels, on top of everything, moving with the body)
+
+    private func buildAccessories() {
+        let dark = cg(0x23252E), light = cg(0xF1EEF8)
+        func layer(_ a: CatAccessory) -> CALayer {
+            let l = CALayer()
+            place(l, in: body, CGRect(x: 0, y: 0, width: 44, height: 28))
+            l.opacity = 0
+            accessoryLayers[a] = l
+            return l
+        }
+        func shape(_ parent: CALayer, _ path: CGPath, fill: CGColor?, stroke: CGColor? = nil, width: CGFloat = 0) {
+            let s = CAShapeLayer()
+            s.path = path
+            s.fillColor = fill
+            s.strokeColor = stroke
+            s.lineWidth = width
+            s.lineJoin = .round
+            s.lineCap = .round
+            s.frame = parent.bounds
+            parent.addSublayer(s)
+        }
+
+        // Headphones: a band over the head, cups over the cheeks.
+        let hp = layer(.headphones)
+        let band = CGMutablePath()
+        band.move(to: CGPoint(x: 1.5, y: 9))
+        band.addQuadCurve(to: CGPoint(x: 42.5, y: 9), control: CGPoint(x: 22, y: -16))
+        shape(hp, band, fill: nil, stroke: dark, width: 2)
+        shape(hp, band, fill: nil, stroke: cg(skin.accent, 0.8), width: 0.5)
+        for x in [-3.0, 41.5] as [CGFloat] {
+            let cup = CGPath(roundedRect: CGRect(x: x, y: 7.5, width: 5.5, height: 10), cornerWidth: 2.5, cornerHeight: 2.5, transform: nil)
+            shape(hp, cup, fill: dark, stroke: cg(skin.accent, 0.9), width: 0.6)
+            shape(hp, CGPath(ellipseIn: CGRect(x: x + 1.9, y: 11.6, width: 1.7, height: 1.7), transform: nil), fill: cg(skin.accent2), stroke: nil)
+        }
+
+        // Glasses: two rounded frames over the eyes, a bridge and short temples.
+        let gl = layer(.glasses)
+        for x in [6.5, 26.5] as [CGFloat] {
+            let frame = CGPath(roundedRect: CGRect(x: x, y: 8.5, width: 11, height: 10), cornerWidth: 3, cornerHeight: 3, transform: nil)
+            shape(gl, frame, fill: cg(0xFFFFFF, 0.08), stroke: cg(skin.accent, 0.95), width: 1)
+            let glare = CGMutablePath()
+            glare.move(to: CGPoint(x: x + 2, y: 12))
+            glare.addLine(to: CGPoint(x: x + 4.5, y: 9.8))
+            shape(gl, glare, fill: nil, stroke: cg(0xFFFFFF, 0.45), width: 0.5)
+        }
+        let bridge = CGMutablePath()
+        bridge.move(to: CGPoint(x: 17.5, y: 12.5))
+        bridge.addQuadCurve(to: CGPoint(x: 26.5, y: 12.5), control: CGPoint(x: 22, y: 10.5))
+        bridge.move(to: CGPoint(x: 6.5, y: 11.5)); bridge.addLine(to: CGPoint(x: 1.5, y: 10.5))
+        bridge.move(to: CGPoint(x: 37.5, y: 11.5)); bridge.addLine(to: CGPoint(x: 42.5, y: 10.5))
+        shape(gl, bridge, fill: nil, stroke: cg(skin.accent, 0.95), width: 1)
+
+        // Nightcap: a floppy cone flopping to the side, white cuff and pompom.
+        let nc = layer(.nightcap)
+        let cap = CGMutablePath()
+        cap.move(to: CGPoint(x: 11, y: 1))
+        cap.addQuadCurve(to: CGPoint(x: 30, y: -10), control: CGPoint(x: 16, y: -12))
+        cap.addQuadCurve(to: CGPoint(x: 44, y: -2), control: CGPoint(x: 40, y: -10))
+        cap.addQuadCurve(to: CGPoint(x: 33, y: 1), control: CGPoint(x: 34, y: -5))
+        cap.closeSubpath()
+        shape(nc, cap, fill: cg(skin.neon ? 0x2B5BD7 : 0x5B4BA0), stroke: cg(skin.accent, 0.5), width: 0.5)
+        shape(nc, CGPath(roundedRect: CGRect(x: 9.5, y: -1.5, width: 25, height: 3.5), cornerWidth: 1.7, cornerHeight: 1.7, transform: nil), fill: light)
+        shape(nc, CGPath(ellipseIn: CGRect(x: 42.2, y: -4.2, width: 4.6, height: 4.6), transform: nil), fill: light)
+
+        // Witch hat (Halloween week): wide brim, a bent cone, an orange band.
+        let wh = layer(.witchHat)
+        shape(wh, CGPath(ellipseIn: CGRect(x: 6, y: -4, width: 32, height: 5), transform: nil), fill: cg(0x2C1745), stroke: cg(skin.accent2, 0.6), width: 0.5)
+        let cone = CGMutablePath()
+        cone.move(to: CGPoint(x: 14, y: -2))
+        cone.addLine(to: CGPoint(x: 30, y: -2))
+        cone.addQuadCurve(to: CGPoint(x: 25, y: -13), control: CGPoint(x: 27, y: -8))
+        cone.addQuadCurve(to: CGPoint(x: 30, y: -14), control: CGPoint(x: 27, y: -15))
+        cone.addQuadCurve(to: CGPoint(x: 14, y: -2), control: CGPoint(x: 18, y: -10))
+        shape(wh, cone, fill: cg(0x3B1F5C), stroke: cg(skin.accent2, 0.6), width: 0.5)
+        shape(wh, CGPath(roundedRect: CGRect(x: 14.5, y: -5, width: 15, height: 2.4), cornerWidth: 0.6, cornerHeight: 0.6, transform: nil), fill: cg(0xFF8A1F))
+
+        // Santa hat (holidays): a red cone leaning over, white trim and pompom.
+        let sh = layer(.santaHat)
+        let santa = CGMutablePath()
+        santa.move(to: CGPoint(x: 12, y: 0))
+        santa.addQuadCurve(to: CGPoint(x: 38, y: -10), control: CGPoint(x: 22, y: -14))
+        santa.addQuadCurve(to: CGPoint(x: 32, y: 0), control: CGPoint(x: 33, y: -4))
+        santa.closeSubpath()
+        shape(sh, santa, fill: cg(0xD7263D), stroke: cg(0x8E1426), width: 0.4)
+        shape(sh, CGPath(roundedRect: CGRect(x: 10, y: -2.5, width: 24, height: 4), cornerWidth: 2, cornerHeight: 2, transform: nil), fill: light)
+        shape(sh, CGPath(ellipseIn: CGRect(x: 36.2, y: -12.5, width: 5, height: 5), transform: nil), fill: light)
+
+        // Beanie (winter): a knitted dome with a ribbed cuff and a pompom.
+        let bn = layer(.beanie)
+        let knit = cg(skin.neon ? 0x2F7D6D : 0x7A4E8F)
+        shape(bn, CGPath(roundedRect: CGRect(x: 9, y: -8, width: 26, height: 10), cornerWidth: 7, cornerHeight: 6, transform: nil), fill: knit)
+        let rib = CGMutablePath()
+        for i in 0..<9 { let x = 10.5 + CGFloat(i) * 2.9; rib.move(to: CGPoint(x: x, y: -1)); rib.addLine(to: CGPoint(x: x, y: 2)) }
+        shape(bn, CGPath(roundedRect: CGRect(x: 8.5, y: -1.2, width: 27, height: 3.6), cornerWidth: 1.6, cornerHeight: 1.6, transform: nil), fill: cg(0xF1EEF8, 0.9))
+        shape(bn, rib, fill: nil, stroke: knit, width: 0.4)
+        shape(bn, CGPath(ellipseIn: CGRect(x: 19.5, y: -11.5, width: 5, height: 5), transform: nil), fill: cg(skin.accent2))
+    }
+
+    private func showAccessories(animated: Bool) {
+        CATransaction.begin()
+        CATransaction.setDisableActions(!animated)
+        CATransaction.setAnimationDuration(0.3)
+        for (a, l) in accessoryLayers { l.opacity = accessories.contains(a) ? 1 : 0 }
+        CATransaction.commit()
     }
 
     /// Ear silhouette in its 12×10 box: stepped pixels (neon) or a soft rounded point (chrome).

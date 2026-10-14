@@ -336,6 +336,32 @@ final class IslandModel: ObservableObject {
         return .idle
     }
 
+    /// Sound goes to Bluetooth headphones (the cat wears some too).
+    @Published private(set) var headphonesOn = false
+    private let audioOutput = AudioOutputWatcher()
+
+    /// What the cat wears right now: headphones, glasses while builds/agents work, a nightcap when
+    /// asleep, else a seasonal hat. Headphones and a hat together would be a mess at 17 pt — headphones win.
+    var petAccessories: Set<CatAccessory> {
+        guard settings.petAccessories else { return [] }
+        var set = Set<CatAccessory>()
+        if headphonesOn { set.insert(.headphones) }
+        if claude.isAnyWorking || developer.tracker.running.contains(where: { $0.category != .server }) { set.insert(.glasses) }
+        if !headphonesOn {
+            if petMood == .sleeping {
+                set.insert(.nightcap)
+            } else {
+                switch PetSeasonHat.on(Date()) {
+                case .witch: set.insert(.witchHat)
+                case .santa: set.insert(.santaHat)
+                case .beanie: set.insert(.beanie)
+                case nil: break
+                }
+            }
+        }
+        return set
+    }
+
     /// The cat chews for a moment after a file lands on the shelf.
     private var munchUntil = Date.distantPast
     private func munch() {
@@ -393,6 +419,9 @@ final class IslandModel: ObservableObject {
         loadShelf()
         loadApps()
         PetProactive.shared.start(model: self)
+        audioOutput.onChange = { [weak self] on in withAnimation(Self.spring) { self?.headphonesOn = on } }
+        audioOutput.start()
+        headphonesOn = audioOutput.headphones
         devices.onEvent = { [weak self] event in self?.showDevicePeek(event) }
         devices.start()
         refreshMedia()

@@ -9,9 +9,10 @@ struct PetView: View {
     let mood: PetMood
     var size: CGFloat = 17
     var gaze: CGFloat? = nil
+    var accessories: Set<CatAccessory> = []
 
     var body: some View {
-        CatView(mood: mood, pointsPerCSSPixel: size / 30, gaze: gaze)
+        CatView(mood: mood, pointsPerCSSPixel: size / 30, gaze: gaze, accessories: accessories)
             .frame(width: size * 1.6, height: size * 1.3)
     }
 }
@@ -20,12 +21,13 @@ struct CatView: View {
     let mood: PetMood
     let pointsPerCSSPixel: CGFloat
     var gaze: CGFloat? = nil
+    var accessories: Set<CatAccessory> = []
 
     var body: some View {
         if Snapshots.active {
             Image(nsImage: CatNSView.still(mood: mood, pointsPerCSSPixel: pointsPerCSSPixel))
         } else {
-            CatLayerView(mood: mood, k: pointsPerCSSPixel, gaze: gaze)
+            CatLayerView(mood: mood, k: pointsPerCSSPixel, gaze: gaze, accessories: accessories)
         }
     }
 }
@@ -34,11 +36,12 @@ private struct CatLayerView: NSViewRepresentable {
     let mood: PetMood
     let k: CGFloat
     let gaze: CGFloat?
+    let accessories: Set<CatAccessory>
 
     func makeNSView(context: Context) -> CatNSView { CatNSView(pointsPerCSSPixel: k) }
 
     func updateNSView(_ view: CatNSView, context: Context) {
-        view.update(mood: mood, gaze: gaze ?? 0)
+        view.update(mood: mood, gaze: gaze ?? 0, accessories: accessories)
     }
 }
 

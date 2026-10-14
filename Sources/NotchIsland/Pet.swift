@@ -16,6 +16,14 @@ enum PetMood: Equatable {
     case waking      // the Mac woke up: a yawn and a stretch
 }
 
+/// Things the cat wears depending on what's going on (see IslandModel.petAccessories).
+enum CatAccessory: String, Hashable, CaseIterable {
+    case headphones   // sound goes to Bluetooth headphones
+    case glasses      // a build/test is running or Claude Code is working
+    case nightcap     // asleep
+    case witchHat, santaHat, beanie   // seasonal
+}
+
 /// The pet's face at a fixed size (agent rows, cards, peeks): the same neon cat as `PetView`,
 /// fitted to `size` points of height. In snapshot mode (ImageRenderer can't draw NSViews) a still
 /// image of the cat in that mood is shown instead.

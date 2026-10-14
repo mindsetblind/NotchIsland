@@ -104,6 +104,8 @@ struct PeekSettings: View {
             }
             Section("Pet") {
                 CatSkinPicker(selection: $settings.catSkin)
+                Toggle("Аксессуары по ситуации", isOn: $settings.petAccessories)
+                    .help("Наушники с AirPods, очки во время сборок и работы Claude, колпак во сне, шапки по сезону")
                 Toggle("Всегда виден справа от выреза", isOn: $settings.petAlwaysVisible)
                 Toggle("Засыпает ночью (с 1 до 6)", isOn: $settings.petSleepsAtNight)
                     .disabled(!settings.petAlwaysVisible)

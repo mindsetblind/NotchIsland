@@ -99,7 +99,7 @@ struct AgentCompactView: View {
                     AgentStatusGlyph(mood: claude.mood)
                 }
             } right: {
-                PetView(mood: model.petMood, size: 17, gaze: model.petGaze)
+                PetView(mood: model.petMood, size: 17, gaze: model.petGaze, accessories: model.petAccessories)
             }
         } else {
             EarsLayout(notchWidth: model.notchSize.width, height: model.notchSize.height) {

@@ -262,9 +262,13 @@ enum PetCapture {
         let window = NSWindow(contentRect: NSRect(x: 40, y: 40, width: cell.width * CGFloat(moods.count), height: cell.height),
                               styleMask: .borderless, backing: .buffered, defer: false)
         window.backgroundColor = .black
-        let views = moods.map { mood -> CatNSView in
+        let dressed: [Set<CatAccessory>] = CommandLine.arguments.contains("--accessories")
+            ? [[.headphones], [.glasses], [.nightcap], [.witchHat], [.santaHat], [.beanie, .glasses]]
+            : Array(repeating: [], count: moods.count)
+        let views = moods.enumerated().map { i, mood -> CatNSView in
             let v = CatNSView(pointsPerCSSPixel: 64 / 30)
-            v.update(mood: mood, gaze: 0)
+            v.update(mood: CommandLine.arguments.contains("--accessories") ? (i == 2 ? .sleeping : .idle) : mood, gaze: 0,
+                     accessories: dressed[i])
             return v
         }
         let container = NSView(frame: NSRect(origin: .zero, size: window.frame.size))

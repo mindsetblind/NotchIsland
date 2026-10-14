@@ -35,6 +35,8 @@ final class AppSettings: ObservableObject {
     @Published var petModel: String { didSet { save(petModel, "petModel") } }
     /// The pet now and then offers help on its own (tidy Downloads, screenshots…).
     @Published var petSuggestions: Bool { didSet { save(petSuggestions, "petSuggestions") } }
+    /// The cat dresses for the occasion (headphones, glasses, nightcap, seasonal hats).
+    @Published var petAccessories: Bool { didSet { save(petAccessories, "petAccessories") } }
     /// The cat's look (CatSkin id).
     @Published var catSkin: String {
         didSet {
@@ -99,6 +101,7 @@ final class AppSettings: ObservableObject {
         petVoice = bool("petVoice", true)
         freeMenuBar = bool("freeMenuBar", true)
         catSkin = d.string(forKey: "catSkin") ?? "neon"
+        petAccessories = bool("petAccessories", true)
         clipboardEnabled = bool("clipboardEnabled", false)
         clipboardPaused = bool("clipboardPaused", false)
         clipboardMaxItems = d.object(forKey: "clipboardMaxItems") as? Int ?? 50

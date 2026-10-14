@@ -231,7 +231,7 @@ struct CompactMusicView: View {
         } right: {
             if model.showsPet {
                 // The pet's eyes bounce like equalizer bars while music plays.
-                PetView(mood: model.petMood, size: 17, gaze: model.petGaze)
+                PetView(mood: model.petMood, size: 17, gaze: model.petGaze, accessories: model.petAccessories)
             } else {
                 EqualizerView(isPlaying: model.nowPlaying?.isPlaying ?? false, tint: .white)
                     .frame(width: 22, height: 17)
@@ -249,7 +249,7 @@ struct PetEarView: View {
         // is centred in it — its whiskers already keep clear of the notch edge.
         HStack(spacing: 0) {
             Spacer().frame(width: model.notchSize.width)
-            PetView(mood: model.petMood, size: 17, gaze: model.petGaze)
+            PetView(mood: model.petMood, size: 17, gaze: model.petGaze, accessories: model.petAccessories)
                 .frame(maxWidth: .infinity)
         }
         .frame(height: model.notchSize.height)
