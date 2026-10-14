@@ -100,7 +100,7 @@ final class AppSettings: ObservableObject {
         petSuggestions = bool("petSuggestions", true)
         petVoice = bool("petVoice", true)
         freeMenuBar = bool("freeMenuBar", true)
-        catSkin = d.string(forKey: "catSkin") ?? "neon"
+        catSkin = d.string(forKey: "catSkin") ?? "chrome"   // closest to macOS materials
         petAccessories = bool("petAccessories", true)
         clipboardEnabled = bool("clipboardEnabled", false)
         clipboardPaused = bool("clipboardPaused", false)

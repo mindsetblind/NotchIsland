@@ -503,10 +503,31 @@ final class IslandModel: ObservableObject {
         refreshMedia()
     }
 
+    /// Tabs worth showing: switched-off features don't take a place in the bar.
+    var visibleTabs: [IslandTab] {
+        IslandTab.allCases.filter { $0 != .clipboard || settings.clipboardEnabled }
+    }
+
+    /// Like the built-in island: opening shows what's live right now (music, timer, agents);
+    /// with nothing going on, the tab you were on last time.
+    private func liveTab() -> IslandTab? {
+        if claude.isAnyWaiting { return .agents }
+        switch currentActivity?.state {
+        case .music: return .music
+        case .pomodoro: return .tools
+        case .agent: return .agents
+        default:
+            if case .notice(let n) = currentActivity { return n.tab }   // e.g. a running build → Agents
+            return nil
+        }
+    }
+
     func setHovering(_ value: Bool) {
         guard value != hovering else { return }
         if value {
             NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now)
+            if let tab = liveTab() { selectedTab = tab; if tab != .music { showPlaylist = false } }
+            if !visibleTabs.contains(selectedTab) { selectedTab = .music }
         }
         withAnimation(value ? Self.open : Self.close) {
             hovering = value

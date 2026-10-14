@@ -40,11 +40,11 @@ struct Notice: Equatable {
         var color: Color {
             switch self {
             case .white: return .white
-            case .green: return Color(red: 0.35, green: 0.85, blue: 0.5)
-            case .red: return Color(red: 1, green: 0.38, blue: 0.35)
-            case .orange: return .orange
-            case .yellow: return .yellow
-            case .blue: return Color(red: 0.35, green: 0.7, blue: 1)
+            case .green: return Color(nsColor: .systemGreen)
+            case .red: return Color(nsColor: .systemRed)
+            case .orange: return Color(nsColor: .systemOrange)
+            case .yellow: return Color(nsColor: .systemYellow)
+            case .blue: return Color(nsColor: .systemBlue)
             }
         }
     }

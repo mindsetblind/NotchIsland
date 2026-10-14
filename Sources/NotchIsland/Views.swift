@@ -335,7 +335,7 @@ struct TabBar: View {
 
     var body: some View {
         HStack(spacing: 1) {
-            ForEach(IslandTab.allCases) { tab in
+            ForEach(model.visibleTabs) { tab in
                 let selected = model.selectedTab == tab
                 Button { model.selectTab(tab) } label: {
                     Image(systemName: tab.symbol)

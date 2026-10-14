@@ -211,7 +211,7 @@ struct PetPanelView: View {
         HStack(spacing: 10) {
             PetView(mood: assistant.mood, size: 20)
             TextField("", text: $assistant.query,
-                      prompt: Text(placeholder).foregroundStyle(.white.opacity(0.35)))
+                      prompt: Text(placeholder).foregroundStyle(.white.opacity(0.55)))
                 .textFieldStyle(.plain)
                 .font(.system(size: 15))
                 .focused($focused)
@@ -231,7 +231,7 @@ struct PetPanelView: View {
                     Image(systemName: "xmark.circle.fill").font(.system(size: 14))
                 }
                 .buttonStyle(.plain)
-                .foregroundStyle(.white.opacity(0.35))
+                .foregroundStyle(.white.opacity(0.55))
                 .help("Очистить")
                 .accessibilityLabel("Очистить")
             }
@@ -249,7 +249,7 @@ struct PetPanelView: View {
                     Image(systemName: "waveform", variableValue: assistant.voice.level)
                         .foregroundStyle(.white)
                 } else {
-                    Image(systemName: "mic.fill").foregroundStyle(.white.opacity(0.35))
+                    Image(systemName: "mic.fill").foregroundStyle(.white.opacity(0.55))
                 }
             }
             .font(.system(size: 14, weight: .medium))
@@ -314,7 +314,7 @@ struct PetPanelView: View {
                 .font(.system(size: 11, weight: .medium)).lineLimit(1)
             Button(action: remove) { Image(systemName: "xmark").font(.system(size: 7.5, weight: .bold)) }
                 .buttonStyle(.plain)
-                .foregroundStyle(.white.opacity(0.45))
+                .foregroundStyle(.white.opacity(0.55))
                 .accessibilityLabel("Убрать \(title)")
         }
         .padding(.horizontal, 8).padding(.vertical, 4)
@@ -368,8 +368,8 @@ struct PetPanelView: View {
                         HStack(spacing: 8) {
                             Image(systemName: source.icon).font(.system(size: 11))
                                 .foregroundStyle(source.kind == .liked ? .green : .white.opacity(0.6)).frame(width: 18)
-                            Text(source.name).font(.system(size: 12.5)).lineLimit(1)
-                            Text(source.subtitle).font(.system(size: 11)).foregroundStyle(.white.opacity(0.4)).lineLimit(1)
+                            Text(source.name).font(.system(size: 12)).lineLimit(1)
+                            Text(source.subtitle).font(.system(size: 11)).foregroundStyle(.white.opacity(0.55)).lineLimit(1)
                             Spacer(minLength: 0)
                         }
                         .frame(height: 25)
@@ -420,11 +420,11 @@ struct PetPanelView: View {
             Label { Text(message).fixedSize(horizontal: false, vertical: true) } icon: {
                 Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
             }
-            .font(.system(size: 12.5))
+            .font(.system(size: 12))
         case .notLoggedIn:
             VStack(alignment: .leading, spacing: 8) {
                 Text("Pet думает с помощью Claude Code, а он ещё не авторизован. Один раз выполни в Терминале:")
-                    .font(.system(size: 12.5)).fixedSize(horizontal: false, vertical: true)
+                    .font(.system(size: 12)).fixedSize(horizontal: false, vertical: true)
                 HStack {
                     Text("claude auth login").font(.system(size: 12, design: .monospaced))
                         .padding(.horizontal, 8).padding(.vertical, 5)
@@ -433,7 +433,7 @@ struct PetPanelView: View {
                         NSPasteboard.general.clearContents()
                         NSPasteboard.general.setString("claude auth login", forType: .string)
                     }
-                    .buttonStyle(.plain).font(.system(size: 11.5, weight: .medium)).foregroundStyle(.white.opacity(0.7))
+                    .buttonStyle(.plain).font(.system(size: 11, weight: .medium)).foregroundStyle(.white.opacity(0.7))
                 }
             }
         }
@@ -463,9 +463,9 @@ struct PetPanelView: View {
         let url = URL(fileURLWithPath: path)
         return HStack(spacing: 8) {
             Image(nsImage: NSWorkspace.shared.icon(forFile: path)).resizable().frame(width: 18, height: 18)
-            Text(url.lastPathComponent).font(.system(size: 12.5)).lineLimit(1)
+            Text(url.lastPathComponent).font(.system(size: 12)).lineLimit(1)
             Text(Self.short(url.deletingLastPathComponent().path)).font(.system(size: 11))
-                .foregroundStyle(.white.opacity(0.4)).lineLimit(1).truncationMode(.head)
+                .foregroundStyle(.white.opacity(0.55)).lineLimit(1).truncationMode(.head)
             Spacer(minLength: 0)
         }
         .frame(height: 25)
@@ -485,7 +485,7 @@ struct PetPanelView: View {
         return HStack(spacing: 8) {
             Image(systemName: icon).font(.system(size: 11)).frame(width: 18)
                 .foregroundStyle(a.kind == .trash ? .red.opacity(0.85) : .white.opacity(0.6))
-            Text(text).font(.system(size: 12.5)).lineLimit(1).truncationMode(.middle)
+            Text(text).font(.system(size: 12)).lineLimit(1).truncationMode(.middle)
             Spacer(minLength: 0)
             if let issue {
                 Text(issue.message).font(.system(size: 11)).foregroundStyle(.orange).lineLimit(1)
@@ -497,54 +497,73 @@ struct PetPanelView: View {
 
     // MARK: Footer
 
+    /// Keyboard hints only while you're getting to know the pet (the first few openings),
+    /// like a first-run coach mark; useful notes ("можно будет отменить") always stay.
+    private var learning: Bool { UserDefaults.standard.integer(forKey: "petPanelOpens") <= 5 }
+
+    /// Nothing to say at rest once you know the keys: the footer collapses.
+    private var footerIsEmpty: Bool {
+        guard !learning else { return false }
+        switch assistant.phase {
+        case .input, .thinking, .failed, .notLoggedIn, .playing: return true
+        case .done(_, let canUndo): return !canUndo
+        case .plan(let plan, let issues): return issues.isEmpty && plan.actions.isEmpty
+        }
+    }
+
     @ViewBuilder
     private var footer: some View {
-        HStack(spacing: 10) {
-            switch assistant.phase {
-            case .thinking:
-                hint("esc — отменить")
-            case _ where assistant.isListening:
-                hint("Отпусти ⌥⇧Space — и я сделаю · esc — отменить")
-                Spacer()
-            case .input where !assistant.suggestions.isEmpty:
-                hint("↑↓ — выбрать · ⏎ или tab — прикрепить")
-                Spacer()
-            case .input:
-                hint(assistant.musicSources.isEmpty ? "⏎ — спросить · перетащи файлы сюда · esc — закрыть"
-                                                    : "⏎ — спросить · @ — плейлисты Spotify · esc — закрыть")
-                Spacer()
-                hint(settings.petProvider == .claude ? "Claude Code · \(settings.petModel.capitalized)" : settings.petProvider.short)
-            case .plan(let plan, let issues):
-                if !issues.isEmpty {
-                    hint("Часть шагов не выйдет — уточни запрос")
-                } else if plan.actions.contains(where: \.modifies) {
-                    hint("Можно будет отменить")
-                } else {
-                    hint("esc — очистить")
+        if !footerIsEmpty {
+            HStack(spacing: 10) {
+                switch assistant.phase {
+                case .thinking:
+                    keyHint("esc — отменить")
+                case _ where assistant.isListening:
+                    keyHint("Отпусти ⌥⇧Space — и я сделаю · esc — отменить")
+                    Spacer()
+                case .input where !assistant.suggestions.isEmpty:
+                    keyHint("↑↓ — выбрать · ⏎ или tab — прикрепить")
+                    Spacer()
+                case .input:
+                    keyHint(assistant.musicSources.isEmpty ? "⏎ — спросить · перетащи файлы сюда · esc — закрыть"
+                                                           : "⏎ — спросить · @ — плейлисты Spotify · esc — закрыть")
+                    Spacer()
+                case .plan(let plan, let issues):
+                    if !issues.isEmpty {
+                        hint("Часть шагов не выйдет — уточни запрос")
+                    } else if plan.actions.contains(where: \.modifies) {
+                        hint("Можно будет отменить")
+                    } else {
+                        keyHint("esc — очистить")
+                    }
+                    Spacer()
+                    if issues.isEmpty && !plan.actions.isEmpty {
+                        Button("Отмена") { assistant.dismissPlan() }.buttonStyle(PetButtonStyle(primary: false))
+                        Button(plan.actions.contains(where: \.modifies) ? "Выполнить" : "Показать") { assistant.execute() }
+                            .buttonStyle(PetButtonStyle(primary: true))
+                    }
+                case .done(_, let canUndo):
+                    if canUndo {
+                        Button("Отменить") { assistant.undo() }
+                            .buttonStyle(PetButtonStyle(primary: false))
+                            .keyboardShortcut("z", modifiers: .command)
+                    }
+                    Spacer()
+                default:
+                    keyHint("esc — очистить")
+                    Spacer()
                 }
-                Spacer()
-                if issues.isEmpty && !plan.actions.isEmpty {
-                    Button("Отмена") { assistant.dismissPlan() }.buttonStyle(PetButtonStyle(primary: false))
-                    Button(plan.actions.contains(where: \.modifies) ? "Выполнить" : "Показать") { assistant.execute() }
-                        .buttonStyle(PetButtonStyle(primary: true))
-                }
-            case .done(_, let canUndo):
-                if canUndo {
-                    Button("Отменить") { assistant.undo() }
-                        .buttonStyle(PetButtonStyle(primary: false))
-                        .keyboardShortcut("z", modifiers: .command)
-                }
-                Spacer()
-            default:
-                hint("esc — очистить")
-                Spacer()
             }
+            .frame(minHeight: 22)
         }
-        .frame(minHeight: 22)
+    }
+
+    @ViewBuilder private func keyHint(_ s: String) -> some View {
+        if learning { hint(s) }
     }
 
     private func hint(_ s: String) -> some View {
-        Text(s).font(.system(size: 10.5)).foregroundStyle(.white.opacity(0.38)).lineLimit(1)
+        Text(s).font(.system(size: 11)).foregroundStyle(.white.opacity(0.55)).lineLimit(1)
     }
 
     // MARK: Helpers

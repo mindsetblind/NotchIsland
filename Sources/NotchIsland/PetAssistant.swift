@@ -358,6 +358,9 @@ final class PetAssistant: ObservableObject {
         isOpen = open
         onOpenChange?(open)
         releaseWork?.cancel()
+        if open {   // counts openings: keyboard hints fade out after the first few
+            UserDefaults.standard.set(UserDefaults.standard.integer(forKey: "petPanelOpens") + 1, forKey: "petPanelOpens")
+        }
         guard open else {
             if voice.isListening { voice.cancel() }
             // Keep the warm Claude for a quick second call; let it go after two quiet minutes.

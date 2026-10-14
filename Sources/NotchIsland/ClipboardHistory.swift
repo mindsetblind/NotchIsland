@@ -435,7 +435,7 @@ struct ClipboardSearchView: View {
                 .foregroundStyle(.secondary)
             VStack(alignment: .leading, spacing: 2) {
                 Text(item.text.trimmingCharacters(in: .whitespacesAndNewlines))
-                    .font(.system(size: 12.5))
+                    .font(.system(size: 12))
                     .lineLimit(2)
                 HStack(spacing: 6) {
                     if item.pinned { Label("закреплено", systemImage: "pin.fill").foregroundStyle(.orange) }

@@ -35,6 +35,7 @@ struct SettingsView: View {
     var body: some View {
         TabView {
             GeneralSettings().tabItem { Label("Основные", systemImage: "gearshape") }
+            PetSettings().tabItem { Label("Pet", systemImage: "pawprint") }
             PeekSettings(calendar: model.calendar).tabItem { Label("Уведомления", systemImage: "bell.badge") }
             MusicSettings(model: model).tabItem { Label("Музыка", systemImage: "music.note") }
             ClipboardSettings(history: model.clipboard).tabItem { Label("Буфер", systemImage: "doc.on.clipboard") }
@@ -68,6 +69,22 @@ private struct GeneralSettings: View {
                      : "Остров раскрывается сам, когда задерживаешь на нём курсор.")
                     .font(.callout).foregroundStyle(.secondary)
             }
+            Section("Строка меню") {
+                Toggle("Уступать место длинному меню приложений", isOn: $settings.freeMenuBar)
+                    .onChange(of: settings.freeMenuBar) { _, _ in MenuBarWatcher.shared.check() }
+                if settings.freeMenuBar {
+                    if MenuBarWatcher.shared.hasAccess {
+                        Text("Когда меню активного приложения доходит до острова (Xcode, Photoshop…), остров сжимается до выреза и возвращается, когда меню короче.")
+                            .font(.callout).foregroundStyle(.secondary)
+                    } else {
+                        HStack {
+                            Text("Без доступа работает по списку известных приложений. С «Универсальным доступом» NotchIsland сам видит, где кончается меню любого приложения (только позиции пунктов меню).")
+                                .font(.callout).foregroundStyle(.secondary)
+                            Button("Разрешить…") { MenuBarWatcher.shared.askForAccess() }
+                        }
+                    }
+                }
+            }
             Section("Клавиатура") {
                 Toggle("⌥Space открывает и закрывает остров", isOn: $settings.hotKeyEnabled)
             }
@@ -85,44 +102,6 @@ struct PeekSettings: View {
             Section("Пока остров свёрнут") {
                 Toggle("Обложка и эквалайзер, когда играет музыка", isOn: $settings.showCompactMusic)
                 Toggle("Таймер помидора", isOn: $settings.showCompactPomodoro)
-            }
-            Section("Строка меню") {
-                Toggle("Уступать место длинному меню приложений", isOn: $settings.freeMenuBar)
-                    .onChange(of: settings.freeMenuBar) { _, _ in MenuBarWatcher.shared.check() }
-                if settings.freeMenuBar {
-                    if MenuBarWatcher.shared.hasAccess {
-                        Text("Когда меню активного приложения доходит до острова (Xcode, Photoshop…), остров сжимается до выреза и возвращается, когда меню короче.")
-                            .font(.callout).foregroundStyle(.secondary)
-                    } else {
-                        HStack {
-                            Text("Без доступа работает по списку известных приложений. С «Универсальным доступом» NotchIsland сам видит, где кончается меню любого приложения (только позиции пунктов меню).")
-                                .font(.callout).foregroundStyle(.secondary)
-                            Button("Разрешить…") { MenuBarWatcher.shared.askForAccess() }
-                        }
-                    }
-                }
-            }
-            Section("Pet") {
-                CatSkinPicker(selection: $settings.catSkin)
-                Toggle("Аксессуары по ситуации", isOn: $settings.petAccessories)
-                    .help("Наушники с AirPods, очки во время сборок и работы Claude, колпак во сне, шапки по сезону")
-                Toggle("Всегда виден справа от выреза", isOn: $settings.petAlwaysVisible)
-                Toggle("Засыпает ночью (с 1 до 6)", isOn: $settings.petSleepsAtNight)
-                    .disabled(!settings.petAlwaysVisible)
-                Text("Следит за курсором, танцует под музыку, «думает», пока работает Claude Code, зовёт, когда он ждёт ответа, и засыпает, если долго не трогать Mac.")
-                    .font(.callout).foregroundStyle(.secondary)
-            }
-            Section("Pet-помощник") {
-                Toggle("Вызывать по ⌥⇧Space", isOn: $settings.petHotKeyEnabled)
-                Toggle("Голос: удерживай ⌥⇧Space и говори", isOn: $settings.petVoice)
-                Toggle("Сам предлагает помощь", isOn: $settings.petSuggestions)
-                if settings.petSuggestions {
-                    Text("Изредка (не чаще раза в 3 часа) смотрит на Загрузки и Рабочий стол и предлагает в острове разобрать завалы. Ничего не делает без твоего подтверждения.")
-                        .font(.callout).foregroundStyle(.secondary)
-                }
-                PetBrainSettings()
-                Text("Pet вылезает из выреза и помогает с файлами: найти, разложить по папкам, переименовать, сжать, убрать в Корзину. А ещё включает музыку в Spotify по просьбе — «включи Radiohead», «что-нибудь для работы»; через @ можно указать плейлист или альбом из медиатеки (нужен вход в Spotify выше). Думает через выбранную модель, сам ничего не меняет — сначала показывает план, а сделанное можно отменить. Работает только в домашней папке, кроме ~/Library и скрытых файлов.")
-                    .font(.callout).foregroundStyle(.secondary)
             }
             Section("Короткие уведомления у выреза") {
                 Toggle("Подключение зарядки", isOn: $settings.showChargingPeek)
@@ -513,5 +492,38 @@ private struct CatSkinPreview: View {
 
     var body: some View {
         Image(nsImage: CatNSView.still(mood: .idle, pointsPerCSSPixel: 1.25, skin: CatSkin.named(skinID)))
+    }
+}
+
+/// Everything about the cat: its look, its behaviour, and the assistant.
+private struct PetSettings: View {
+    @ObservedObject private var settings = AppSettings.shared
+
+    var body: some View {
+        Form {
+            Section("Кот") {
+                CatSkinPicker(selection: $settings.catSkin)
+                Toggle("Аксессуары по ситуации", isOn: $settings.petAccessories)
+                    .help("Наушники с AirPods, очки во время сборок и работы Claude, колпак во сне, шапки по сезону")
+                Toggle("Всегда виден справа от выреза", isOn: $settings.petAlwaysVisible)
+                Toggle("Засыпает ночью (с 1 до 6)", isOn: $settings.petSleepsAtNight)
+                    .disabled(!settings.petAlwaysVisible)
+                Text("Следит за курсором, танцует под музыку, «думает», пока работает Claude Code, зовёт, когда он ждёт ответа, и засыпает, если долго не трогать Mac.")
+                    .font(.callout).foregroundStyle(.secondary)
+            }
+            Section("Помощник") {
+                Toggle("Вызывать по ⌥⇧Space", isOn: $settings.petHotKeyEnabled)
+                Toggle("Голос: удерживай ⌥⇧Space и говори", isOn: $settings.petVoice)
+                Toggle("Сам предлагает помощь", isOn: $settings.petSuggestions)
+                if settings.petSuggestions {
+                    Text("Изредка (не чаще раза в 3 часа) смотрит на Загрузки и Рабочий стол и предлагает в острове разобрать завалы. Ничего не делает без твоего подтверждения.")
+                        .font(.callout).foregroundStyle(.secondary)
+                }
+                PetBrainSettings()
+                Text("Pet вылезает из выреза и помогает с файлами: найти, разложить по папкам, переименовать, сжать, убрать в Корзину. А ещё включает музыку в Spotify по просьбе — «включи Radiohead», «что-нибудь для работы»; через @ можно указать плейлист или альбом из медиатеки (нужен вход в Spotify во вкладке «Музыка»). Думает через выбранную модель, сам ничего не меняет — сначала показывает план, а сделанное можно отменить. Работает только в домашней папке, кроме ~/Library и скрытых файлов.")
+                    .font(.callout).foregroundStyle(.secondary)
+            }
+        }
+        .formStyle(.grouped)
     }
 }

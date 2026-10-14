@@ -29,7 +29,7 @@ struct PermissionCardView: View {
             VStack(alignment: .leading, spacing: 8) {
                 Text(ask.title).font(.system(size: 14, weight: .semibold))
                 Text(ask.detail.isEmpty ? ask.toolName : ask.detail)
-                    .font(.system(size: 11.5, design: .monospaced))
+                    .font(.system(size: 11, design: .monospaced))
                     .lineLimit(2)
                     .truncationMode(.middle)
                     .foregroundStyle(.white.opacity(0.85))

@@ -94,13 +94,16 @@ struct CatSkin: Identifiable, Equatable {
 
     static let all = [neonCat, cosmicChrome]
     static func named(_ id: String) -> CatSkin { all.first { $0.id == id } ?? neonCat }
-    static var current: CatSkin { named(UserDefaults.standard.string(forKey: "catSkin") ?? "neon") }
+    static var current: CatSkin { named(UserDefaults.standard.string(forKey: "catSkin") ?? "chrome") }
     static let changed = Notification.Name("CatSkinChanged")
 }
 
 final class CatNSView: NSView {
     /// Points per CSS pixel.
     private let k: CGFloat
+    /// Tiny cats (head under ~14 pt: session rows, alerts) keep only the silhouette, eyes and nose —
+    /// whiskers, stripes and glitches turn into noise at that size.
+    private var simple: Bool { 28 * k < 14 }
     private var skin: CatSkin
     private let fixedSkin: CatSkin?
     // Rebuilt from scratch when the skin changes.
@@ -327,7 +330,7 @@ final class CatNSView: NSView {
         head.cornerRadius = 9
         head.masksToBounds = true
         place(head, in: body, headRect)
-        if skin.neon {
+        if skin.neon && !simple {
             // Magenta scan stripe, inner highlight and shade, glitch slices.
             _ = rect(head, CGRect(x: 29.9, y: 0, width: 1.8, height: 28), cg(0xFF3AD2, 0.24))
             _ = rect(head, CGRect(x: 1, y: 0, width: 2, height: 28), cg(0x80F0FF, 0.2))
@@ -339,7 +342,7 @@ final class CatNSView: NSView {
             place(glitchB, in: head, CGRect(x: 29.2, y: 20, width: 18.5, height: 3))
             glitchB.backgroundColor = cg(0xFF3BD4)
             for g in [glitchA, glitchB] { g.opacity = 0 }
-        } else {
+        } else if !skin.neon {
             // Polished metal: a light sheen along the top, a shade along the bottom.
             let sheen = CAGradientLayer()
             sheen.colors = [cg(0xDDD5FF, 0.19), cg(0xDDD5FF, 0)]
@@ -406,6 +409,7 @@ final class CatNSView: NSView {
         for (i, w) in whiskers.enumerated() {
             place(w, in: body, CGRect(x: i == 0 ? -2 : 37, y: 16, width: 9, height: 7))
             w.opacity = 0.65
+            w.isHidden = simple
             for (y, deg) in [(1.0, 10.0), (5, -10)] as [(CGFloat, CGFloat)] {
                 let line = CALayer()
                 line.backgroundColor = cg(skin.whiskers)
@@ -625,7 +629,7 @@ final class CatNSView: NSView {
             return
         }
         // Neon: the occasional signal flicker and glitch slices.
-        if skin.neon {
+        if skin.neon && !simple {
             animate(stage, CatMotion.flicker, scalar: "opacity", property: "op", fallback: 1)
             animate(glitchA, CatMotion.glitchA, scalar: "opacity", property: "op", fallback: 0)
             animate(glitchA, CatMotion.glitchA, key: "slide")
@@ -734,11 +738,12 @@ enum CatMotion {
     typealias K = CSSKeyframes
 
     static let blink = K(duration: 3.8, timing: .steps(2), groups: [([0, 0.34, 0.43, 0.76, 0.84, 1], ["sy": 1]), ([0.38, 0.80], ["sy": 0.12])])
-    static let flicker = K(duration: 5.6, timing: .steps(1), groups: [([0, 0.89, 0.91, 0.94, 1], ["op": 1]), ([0.90], ["op": 0.68]), ([0.92], ["op": 0.9])])
-    static let glitchA = K(duration: 4.8, timing: .steps(1), groups: [
-        ([0, 0.84, 0.88, 1], ["op": 0, "tx": 0]), ([0.85], ["op": 0.9, "tx": 10]), ([0.86], ["op": 0.45, "tx": -4]), ([0.87], ["op": 1, "tx": 5])])
-    static let glitchB = K(duration: 4.8, timing: .steps(1), groups: [
-        ([0, 0.90, 0.94, 1], ["op": 0, "tx": 0]), ([0.91], ["op": 1, "tx": -10]), ([0.92], ["op": 0.55, "tx": 4]), ([0.93], ["op": 0.9, "tx": -3])])
+    // Rarer and softer than in Make (the bursts keep their length): a hint of character, not a show.
+    static let flicker = K(duration: 14, timing: .steps(1), groups: [([0, 0.956, 0.964, 0.976, 1], ["op": 1]), ([0.96], ["op": 0.82]), ([0.968], ["op": 0.94])])
+    static let glitchA = K(duration: 12, timing: .steps(1), groups: [
+        ([0, 0.936, 0.952, 1], ["op": 0, "tx": 0]), ([0.94], ["op": 0.7, "tx": 10]), ([0.944], ["op": 0.35, "tx": -4]), ([0.948], ["op": 0.8, "tx": 5])])
+    static let glitchB = K(duration: 12, timing: .steps(1), groups: [
+        ([0, 0.96, 0.976, 1], ["op": 0, "tx": 0]), ([0.964], ["op": 0.8, "tx": -10]), ([0.968], ["op": 0.45, "tx": 4]), ([0.972], ["op": 0.7, "tx": -3])])
     static let sleepPose = K(duration: 3.4, timing: .steps(6), [(0, ["ty": 3, "sx": 1.08, "sy": 0.86, "rot": -2])])
 
     static func specs(for mood: PetMood) -> [Spec] {
