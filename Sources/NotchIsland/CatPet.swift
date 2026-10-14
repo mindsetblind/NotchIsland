@@ -55,6 +55,8 @@ struct CatSkin: Identifiable, Equatable {
         switch mood {
         case .hungry, .gaping: return pupils[.attention] ?? 0xFFFFFF   // eager
         case .munching, .full: return pupils[.happy] ?? 0xFFFFFF       // content
+        case .scared: return pupils[.attention] ?? 0xFFFFFF
+        case .sad, .waking: return pupils[.idle] ?? 0xFFFFFF
         default: return pupils[mood] ?? pupils[.idle] ?? 0xFFFFFF
         }
     }
@@ -485,7 +487,7 @@ final class CatNSView: NSView {
         }
         for w in whiskers { w.opacity = 0.65 }
         for l in [mouthLines, mouthOpen] + cheeks { l.transform = CATransform3DIdentity }
-        let mouthFull = [PetMood.hungry, .gaping, .munching].contains(mood)
+        let mouthFull = [PetMood.hungry, .gaping, .munching, .waking].contains(mood)
         mouthOpen.opacity = mouthFull ? 1 : 0
         mouthLines.opacity = mouthFull ? 0 : 1
         for c in cheeks { c.opacity = mood == .full || mood == .munching ? 1 : 0 }
@@ -721,6 +723,39 @@ enum CatMotion {
                     ([0, 0.6, 0.72, 0.84, 1], ["s": 1]), ([0.66, 0.78], ["s": 1.08, "sy": 0.9])])),
                 Spec(part: .eyes, frames: blink),
                 Spec(part: .earLeft, frames: ear), Spec(part: .earRight, frames: ear),
+            ]
+        case .scared:
+            // Battery almost empty: shrinks, trembles, ears flat, wide eyes with tiny pupils, bristling whiskers.
+            let ear = K(duration: 0.16, timing: .linear, groups: [([0, 1], ["rot": -26, "ty": 1])])
+            return [
+                Spec(part: .body, frames: K(duration: 0.16, timing: .steps(2), groups: [([0, 1], ["s": 0.9, "tx": -0.5, "ty": 1]), ([0.5], ["s": 0.9, "tx": 0.5, "ty": 1])])),
+                Spec(part: .eyes, frames: K(duration: 0.16, timing: .linear, groups: [([0, 1], ["sx": 1.15, "sy": 1.3])])),
+                Spec(part: .pupils, frames: K(duration: 0.16, timing: .linear, groups: [([0, 1], ["s": 0.55])])),
+                Spec(part: .whiskers, frames: K(duration: 0.16, timing: .linear, groups: [([0, 1], ["op": 1, "ty": -1])])),
+                Spec(part: .earLeft, frames: ear), Spec(part: .earRight, frames: ear),
+            ]
+        case .sad:
+            // Droopy: ears down, half-closed eyes looking at the floor, shoulders down, slow sigh.
+            let ear = K(duration: 2.4, timing: .easeInOut, groups: [([0, 1], ["rot": -22, "ty": 2]), ([0.5], ["rot": -26, "ty": 2.5])])
+            return [
+                Spec(part: .body, frames: K(duration: 2.4, timing: .easeInOut, groups: [([0, 1], ["ty": 2, "sx": 1.03, "sy": 0.94]), ([0.5], ["ty": 2.6, "sx": 1.04, "sy": 0.92, "rot": -1.5])])),
+                Spec(part: .eyes, frames: K(duration: 2.4, timing: .easeInOut, groups: [([0, 1], ["sy": 0.5, "ty": 1.5])])),
+                Spec(part: .pupils, frames: K(duration: 2.4, timing: .easeInOut, groups: [([0, 1], ["ty": 1.8])])),
+                Spec(part: .whiskers, frames: K(duration: 2.4, timing: .easeInOut, groups: [([0, 1], ["op": 0.4, "ty": 1.5])])),
+                Spec(part: .earLeft, frames: ear), Spec(part: .earRight, frames: ear),
+            ]
+        case .waking:
+            // Good morning: eyes open slowly, a big yawn, a stretch with the paws up.
+            return [
+                Spec(part: .eyes, frames: K(duration: 2.6, timing: .easeInOut, groups: [([0, 0.3], ["sy": 0.1]), ([0.55], ["sy": 0.3]), ([0.8, 1], ["sy": 1])])),
+                Spec(part: .mouthOpen, frames: K(duration: 2.6, timing: .easeInOut, groups: [
+                    ([0], ["sx": 0.3, "sy": 0.05]), ([0.25, 0.5], ["sx": 0.42, "sy": 0.6]), ([0.7, 1], ["sx": 0.3, "sy": 0.02])])),
+                Spec(part: .body, frames: K(duration: 2.6, timing: .easeInOut, groups: [
+                    ([0], ["ty": 2, "sy": 0.95]), ([0.35], ["ty": -2, "sx": 0.96, "sy": 1.12]), ([0.7, 1], ["ty": 0])])),
+                Spec(part: .pawLeft, frames: K(duration: 2.6, timing: .easeInOut, groups: [([0, 0.15, 0.75, 1], ["op": 0]), ([0.3, 0.6], ["op": 1, "ty": -7, "tx": -2, "rot": 30])])),
+                Spec(part: .pawRight, frames: K(duration: 2.6, timing: .easeInOut, groups: [([0, 0.15, 0.75, 1], ["op": 0]), ([0.3, 0.6], ["op": 1, "ty": -7, "tx": 2, "rot": -30])])),
+                Spec(part: .earLeft, frames: K(duration: 2.6, timing: .easeInOut, groups: [([0, 1], ["rot": 0]), ([0.35], ["rot": 8]), ([0.7], ["rot": -6])])),
+                Spec(part: .earRight, frames: K(duration: 2.6, timing: .easeInOut, groups: [([0, 1], ["rot": 0]), ([0.35], ["rot": 8]), ([0.7], ["rot": -6])])),
             ]
         case .dancing:
             return [

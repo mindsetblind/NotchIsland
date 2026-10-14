@@ -293,7 +293,8 @@ final class IslandModel: ObservableObject {
 
     /// Set from the mouse tracker: -1…1 = cursor left/right of the face; nil = too far to care.
     @Published private(set) var petGaze: CGFloat?
-    private var happyUntil = Date.distantPast
+    /// A short reaction to something that just happened (see `react`).
+    private var reaction: (mood: PetMood, from: Date, until: Date)?
     private var lastPetMood: PetMood?
 
     /// While the pet is out helping (⌥⇧Space), its spot right of the notch stays empty.
@@ -327,7 +328,7 @@ final class IslandModel: ObservableObject {
         if claude.isAnyWorking { return .working }
         // Only a short burst of joy: a finished Claude session stays "done" for minutes, and a face
         // frozen in ^ ^ for that long stops blinking, dancing and sleeping.
-        if Date() < happyUntil { return .happy }
+        if let r = reaction, Date() >= r.from, Date() < r.until { return r.mood }
         // Music beats a full mouth (the shelf may stay full for days); a full mouth beats a nap.
         if nowPlaying?.isPlaying == true { return .dancing }
         if !shelf.isEmpty { return .full }
@@ -361,10 +362,17 @@ final class IslandModel: ObservableObject {
     }
 
     /// A short happy hop: file shelved, color copied, AirDrop sent…
-    func cheer() {
-        happyUntil = Date().addingTimeInterval(2.5)
+    func cheer() { react(.happy, for: 2.5) }
+
+    /// The cat reacts to an event for a few seconds. `after`: wait for an alert that covers the cat
+    /// (device, battery, build…) to go away first, so the reaction is actually seen.
+    func react(_ mood: PetMood, for seconds: TimeInterval, after delay: TimeInterval = 0) {
+        let from = Date().addingTimeInterval(delay)
+        reaction = (mood, from, from.addingTimeInterval(seconds))
         objectWillChange.send()
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2.6) { [weak self] in self?.objectWillChange.send() }
+        for t in [delay, delay + seconds] where t > 0 {
+            DispatchQueue.main.asyncAfter(deadline: .now() + t + 0.05) { [weak self] in self?.objectWillChange.send() }
+        }
     }
 
     /// Moods that change with time (sleep) don't trigger a re-render by themselves — check now and then.
@@ -514,6 +522,7 @@ final class IslandModel: ObservableObject {
 
     /// After sleep: state polled from the outside world may be stale.
     func systemDidWake() {
+        react(.waking, for: 2.6)
         refreshMedia()
         refreshBattery()
         checkPetMood()
@@ -1138,7 +1147,12 @@ final class IslandModel: ObservableObject {
 
     private func showDevicePeek(_ event: DeviceEvent) {
         let isDrive = event.symbol.hasPrefix("externaldrive")
-        guard isDrive ? settings.showDrivePeek : settings.showBluetoothPeek else { return }
+        let shown = isDrive ? settings.showDrivePeek : settings.showBluetoothPeek
+        // AirPods & co. arriving make the cat happy, leaving make it sad (drives: only a hello).
+        if event.connected || !isDrive {
+            react(event.connected ? .happy : .sad, for: event.connected ? 2.5 : 3, after: shown ? 3.5 : 0)
+        }
+        guard shown else { return }
         if event.connected { NSHapticFeedbackManager.defaultPerformer.perform(.levelChange, performanceTime: .now) }
         // Keyed by name: a quick disconnect → reconnect updates one alert instead of queueing two.
         post(.device, event.name, .device(event), duration: 3.5)
@@ -1242,9 +1256,14 @@ final class IslandModel: ObservableObject {
         let pluggedIn = new.onAC && !battery.onAC
         if new != battery { battery = new }
         if pluggedIn && new.hasBattery && settings.showChargingPeek { showChargingPeek() }
-        if let level = lowBattery.update(new), settings.isActivityEnabled(.battery) {
-            post(.battery, "low", .notice(Notice(symbol: level <= 10 ? "battery.0percent" : "battery.25percent", tint: .red,
-                                                 title: "Низкий заряд", detail: "\(level)%")), duration: 5)
+        if pluggedIn && new.hasBattery { react(.happy, for: 2.5, after: settings.showChargingPeek ? 3 : 0) }
+        if let level = lowBattery.update(new) {
+            let alert = settings.isActivityEnabled(.battery)
+            if level <= 10 { react(.scared, for: 3.5, after: alert ? 5 : 0) }   // almost empty: the cat panics
+            if alert {
+                post(.battery, "low", .notice(Notice(symbol: level <= 10 ? "battery.0percent" : "battery.25percent", tint: .red,
+                                                     title: "Низкий заряд", detail: "\(level)%")), duration: 5)
+            }
         }
     }
 

@@ -11,6 +11,9 @@ enum PetMood: Equatable {
     case gaping      // the file is right above the shelf: mouth wide open
     case munching    // a file landed on the shelf: chomp chomp, cheeks fill up
     case full        // files sit on the shelf: puffed cheeks, the odd chew
+    case scared      // battery almost empty: shrinks and trembles
+    case sad         // a device left, a build failed: droopy ears and eyes
+    case waking      // the Mac woke up: a yawn and a stretch
 }
 
 /// The pet's face at a fixed size (agent rows, cards, peeks): the same neon cat as `PetView`,

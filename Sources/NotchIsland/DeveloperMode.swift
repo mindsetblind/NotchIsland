@@ -93,6 +93,9 @@ final class DeveloperMonitor: ObservableObject {
                 notice = Notice(symbol: "stop.circle", tint: .white, title: t.title, detail: "отменено", tab: .agents)
             }
             model.post(.developer, t.id, .notice(notice), duration: t.state == .failure ? 5 : 3.5)
+            // The cat shares the moment once the alert has gone: a cheer or a sulk.
+            if t.state == .success { model.react(.happy, for: 2.5, after: 3.5) }
+            if t.state == .failure { model.react(.sad, for: 3, after: 5) }
         case .takingLong(let t):
             model.post(.developer, t.id, .notice(Notice(symbol: "hourglass", tint: .orange, title: t.title,
                                                        detail: "уже " + formatElapsed(t.duration(at: Date())), tab: .agents)),

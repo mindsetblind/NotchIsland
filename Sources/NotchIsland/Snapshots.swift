@@ -253,7 +253,9 @@ enum PetCapture {
         NSApp.setActivationPolicy(.accessory)
 
         if let j = args.firstIndex(of: "--skin"), j + 1 < args.count { UserDefaults.standard.set(args[j + 1], forKey: "catSkin") }
-        let moods: [PetMood] = CommandLine.arguments.contains("--shelf")
+        let moods: [PetMood] = CommandLine.arguments.contains("--reactions")
+            ? [.idle, .happy, .scared, .sad, .waking, .waking]
+            : CommandLine.arguments.contains("--shelf")
             ? [.idle, .hungry, .gaping, .munching, .full, .full]
             : [.idle, .working, .attention, .happy, .sleeping, .dancing]
         let cell = NSSize(width: 140, height: 110)
