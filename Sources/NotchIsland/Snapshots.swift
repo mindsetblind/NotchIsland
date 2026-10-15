@@ -263,7 +263,7 @@ enum PetCapture {
                               styleMask: .borderless, backing: .buffered, defer: false)
         window.backgroundColor = .black
         let dressed: [Set<CatAccessory>] = CommandLine.arguments.contains("--accessories")
-            ? [[.headphones], [.glasses], [.nightcap], [.witchHat], [.santaHat], [.beanie, .glasses]]
+            ? [[], [.glasses], [.nightcap], [.witchHat], [.santaHat], [.beanie, .glasses]]
             : Array(repeating: [], count: moods.count)
         let views = moods.enumerated().map { i, mood -> CatNSView in
             let v = CatNSView(pointsPerCSSPixel: 64 / 30)

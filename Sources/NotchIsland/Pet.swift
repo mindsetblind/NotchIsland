@@ -18,7 +18,6 @@ enum PetMood: Equatable {
 
 /// Things the cat wears depending on what's going on (see IslandModel.petAccessories).
 enum CatAccessory: String, Hashable, CaseIterable {
-    case headphones   // sound goes to Bluetooth headphones
     case glasses      // a build/test is running or Claude Code is working
     case nightcap     // asleep
     case witchHat, santaHat, beanie   // seasonal

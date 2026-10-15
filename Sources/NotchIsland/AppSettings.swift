@@ -37,7 +37,7 @@ final class AppSettings: ObservableObject {
     @Published var petSuggestions: Bool { didSet { save(petSuggestions, "petSuggestions") } }
     /// Count locally which features get used (Settings → Статистика).
     @Published var usageStats: Bool { didSet { save(usageStats, "usageStats") } }
-    /// The cat dresses for the occasion (headphones, glasses, nightcap, seasonal hats).
+    /// The cat dresses for the occasion (glasses, nightcap, seasonal hats).
     @Published var petAccessories: Bool { didSet { save(petAccessories, "petAccessories") } }
     /// The cat's look (CatSkin id).
     @Published var catSkin: String {

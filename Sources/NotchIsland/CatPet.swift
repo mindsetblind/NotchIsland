@@ -443,19 +443,6 @@ final class CatNSView: NSView {
             parent.addSublayer(s)
         }
 
-        // Headphones: a band over the head, cups over the cheeks.
-        let hp = layer(.headphones)
-        let band = CGMutablePath()
-        band.move(to: CGPoint(x: 1.5, y: 9))
-        band.addQuadCurve(to: CGPoint(x: 42.5, y: 9), control: CGPoint(x: 22, y: -16))
-        shape(hp, band, fill: nil, stroke: dark, width: 2)
-        shape(hp, band, fill: nil, stroke: cg(skin.accent, 0.8), width: 0.5)
-        for x in [-3.0, 41.5] as [CGFloat] {
-            let cup = CGPath(roundedRect: CGRect(x: x, y: 7.5, width: 5.5, height: 10), cornerWidth: 2.5, cornerHeight: 2.5, transform: nil)
-            shape(hp, cup, fill: dark, stroke: cg(skin.accent, 0.9), width: 0.6)
-            shape(hp, CGPath(ellipseIn: CGRect(x: x + 1.9, y: 11.6, width: 1.7, height: 1.7), transform: nil), fill: cg(skin.accent2), stroke: nil)
-        }
-
         // Glasses: two rounded frames over the eyes, a bridge and short temples.
         let gl = layer(.glasses)
         for x in [6.5, 26.5] as [CGFloat] {
