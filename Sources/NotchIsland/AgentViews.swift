@@ -389,6 +389,7 @@ private struct InteractivePet: View {
 
     /// One stroke: a happy wave; four strokes within a few seconds: a little dance.
     private func pet() {
+        Usage.track(.catPetted)
         let now = Date()
         strokes = strokes.filter { now.timeIntervalSince($0) < 3 } + [now]
         reaction = strokes.count >= 4 ? .dancing : .happy

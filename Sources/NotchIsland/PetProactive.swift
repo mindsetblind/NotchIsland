@@ -53,6 +53,7 @@ final class PetProactive {
         model.post(.pet, suggestion.rawValue, .notice(Notice(symbol: "sparkles", title: title, detail: detail,
                                                              petRequest: request)), duration: 10)
         suggester.markShown(suggestion, at: now)
+        Usage.track(.petOfferShown)
         if let data = try? JSONEncoder().encode(suggester) { UserDefaults.standard.set(data, forKey: Self.storeKey) }
         debugLog("pet: offered \(suggestion.rawValue)")
     }

@@ -314,7 +314,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 // "Hover" mode: it opens after resting on it briefly.
                 model.setHoverHint(true)
                 if enteredAt == nil { enteredAt = now }
-                if opensOnHover, now.timeIntervalSince(enteredAt!) > 0.15 { model.setHovering(true) }
+                if opensOnHover, now.timeIntervalSince(enteredAt!) > 0.15 { Usage.track(.islandOpenedHover); model.setHovering(true) }
             }
         } else {
             enteredAt = nil

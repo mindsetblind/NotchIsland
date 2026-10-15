@@ -109,6 +109,7 @@ final class ClipboardHistory: ObservableObject {
     // MARK: Actions
 
     func copyBack(_ item: ClipItem) {
+        Usage.track(.clipboardCopied)
         let pb = NSPasteboard.general
         pb.clearContents()
         pb.setString(item.text, forType: .string)

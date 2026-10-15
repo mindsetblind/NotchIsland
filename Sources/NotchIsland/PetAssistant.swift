@@ -324,6 +324,7 @@ final class PetAssistant: ObservableObject {
 
     func startListening() {
         guard !voice.isListening else { return }
+        Usage.track(.petVoice)
         if case .thinking = phase { cancelThinking() }
         if phase != .input { reset() }
         query = ""
@@ -458,6 +459,7 @@ final class PetAssistant: ObservableObject {
 
     /// Just a tag, no words: play it right away, no Claude needed.
     private func playTag(_ source: PetMusicSource) {
+        Usage.track(.petTag)
         task?.cancel()
         asked = "@" + source.name
         phase = .thinking
@@ -472,6 +474,7 @@ final class PetAssistant: ObservableObject {
     }
 
     private func showPlaying(_ text: String, closeAfter seconds: Double = 2.5) {
+        if seconds > 1 { Usage.track(.petMusic) }   // media commands close after 1 s: not "played music"
         phase = .playing(text)
         // The pet goes back into the notch shortly — the island shows the track.
         Task {
@@ -490,8 +493,10 @@ final class PetAssistant: ObservableObject {
             do {
                 // Simple requests never reach Claude.
                 if context.music == nil, let intent = PetQuickIntent.parse(text), try await self.runQuick(intent) {
+                    Usage.track(.petQuick)
                     return
                 }
+                Usage.track(.petModel)
                 defer { if self.isOpen { DispatchQueue.global(qos: .utility).async { brain.prewarm() } } }
                 // "@Tag + words": let Claude pick from that playlist's own tracks.
                 var tracks: [PlaylistTrack] = []
@@ -600,6 +605,7 @@ final class PetAssistant: ObservableObject {
             setOpen(false)   // just open/reveal: get out of the way
             phase = .input
         } else {
+            Usage.track(.petPlanRun)
             phase = .done(Self.summary(changed), canUndo: !lastUndo.isEmpty)
             NSSound(named: "Glass")?.play()
         }
@@ -607,6 +613,7 @@ final class PetAssistant: ObservableObject {
 
     func undo() {
         guard !lastUndo.isEmpty else { return }
+        Usage.track(.petUndo)
         let failed = executor.undo(lastUndo)
         lastUndo = []
         phase = .done(failed == 0 ? "Вернул всё как было" : "Вернул почти всё: \(failed) не получилось", canUndo: false)

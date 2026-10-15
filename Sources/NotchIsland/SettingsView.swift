@@ -42,6 +42,7 @@ struct SettingsView: View {
             ClaudeSettings().tabItem { Label("Claude Code", systemImage: "eyes") }
             DeveloperSettings().tabItem { Label("Разработка", systemImage: "hammer") }
             ToolSettings(model: model).tabItem { Label("Инструменты", systemImage: "wrench.and.screwdriver") }
+            UsageSettings().tabItem { Label("Статистика", systemImage: "chart.bar") }
             AboutSettings().tabItem { Label("О программе", systemImage: "info.circle") }
         }
         .frame(width: 640, height: 500)

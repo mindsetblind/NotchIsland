@@ -72,6 +72,7 @@ final class PetPanelController {
 
     func open() {
         guard let (screen, notch) = placement() else { return }
+        Usage.track(.petPanelOpened)
         hideWork?.cancel()
         let panel = self.panel ?? makePanel()
         self.panel = panel

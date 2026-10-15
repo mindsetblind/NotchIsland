@@ -93,6 +93,7 @@ final class Pomodoro: ObservableObject {
     func toggle() { isRunning ? pause() : start() }
 
     func start() {
+        Usage.track(.pomodoroStarted)
         guard !isRunning else { return }
         endDate = Date().addingTimeInterval(pausedRemaining)
         withAnimation(IslandModel.spring) { isRunning = true }

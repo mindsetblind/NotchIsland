@@ -195,6 +195,7 @@ final class ClaudeMonitor: ObservableObject {
     enum Answer { case allow, always, deny, terminal }
 
     func answer(_ ask: PermissionAsk, _ answer: Answer) {
+        Usage.track(.agentPermissionAnswered)
         guard permissions.contains(ask) else { return }
         hangupWatchers.removeValue(forKey: ask.id)?.cancel()
         var decision: [String: Any]?

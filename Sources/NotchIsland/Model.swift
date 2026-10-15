@@ -538,6 +538,14 @@ final class IslandModel: ObservableObject {
 
     func selectTab(_ tab: IslandTab) {
         guard tab != selectedTab else { return }
+        switch tab {
+        case .music: Usage.track(.tabMusic)
+        case .apps: Usage.track(.tabApps)
+        case .shelf: Usage.track(.tabShelf)
+        case .clipboard: Usage.track(.tabClipboard)
+        case .agents: Usage.track(.tabAgents)
+        case .tools: Usage.track(.tabTools)
+        }
         withAnimation(Self.spring) {
             selectedTab = tab
             if tab != .music { showPlaylist = false }
@@ -550,12 +558,14 @@ final class IslandModel: ObservableObject {
     func openFromClick() {
         // The pet's own offer: open the pet with the request instead of the island.
         if let alert = activities.shownAlert, case .notice(let n) = alert.payload, let request = n.petRequest {
+            Usage.track(.petOfferAccepted)
             withAnimation(Self.spring) { activities.dismiss(alert.id) }
             setHoverHint(false)
             PetPanelController.shared.open()
             petAssistant.ask(request)
             return
         }
+        Usage.track(.islandOpenedClick)
         if let alert = activities.shownAlert, let tab = Self.tab(for: alert.payload) { selectTab(tab) }
         setHovering(true)
     }
@@ -582,6 +592,7 @@ final class IslandModel: ObservableObject {
 
     /// Keyboard shortcut: open (and keep open) or close the island.
     func toggleFromHotKey() {
+        Usage.track(.islandOpenedHotKey)
         if hovering {
             setHovering(false)
         } else {
@@ -724,6 +735,7 @@ final class IslandModel: ObservableObject {
     }
 
     func perform(_ command: MediaCommand) {
+        Usage.track(.musicControl)
         guard var np = nowPlaying else { return }
         lastCommandAt = Date()
         media.send(command, to: np.source)
@@ -749,6 +761,7 @@ final class IslandModel: ObservableObject {
     }
 
     func togglePlaylist() {
+        if !showPlaylist { Usage.track(.playlistOpened) }
         withAnimation(Self.open) { showPlaylist.toggle() }
         if showPlaylist { loadPlaylist(onlyIfStale: true) }
     }
@@ -909,6 +922,7 @@ final class IslandModel: ObservableObject {
     }
 
     func play(_ track: PlaylistTrack) {
+        Usage.track(.trackChosen)
         guard let list = playlist else { return }
         if track.uri.hasPrefix("music:") {
             media.playMusicTrack(uri: track.uri)
@@ -1023,6 +1037,7 @@ final class IslandModel: ObservableObject {
     }
 
     func airDrop(urls: [URL]) {
+        Usage.track(.airDrop)
         guard !urls.isEmpty, let service = NSSharingService(named: .sendViaAirDrop),
               service.canPerform(withItems: urls) else { return }
         NSApp.activate(ignoringOtherApps: true)
@@ -1055,7 +1070,7 @@ final class IslandModel: ObservableObject {
             self.setFileDrag(false)
             let new = urls.filter { !self.shelf.contains($0) }
             withAnimation(Self.spring) { self.shelf.append(contentsOf: new) }
-            if !new.isEmpty { self.selectTab(.shelf); self.munch() }
+            if !new.isEmpty { Usage.track(.shelfAdded); self.selectTab(.shelf); self.munch() }
             self.saveShelf()
         }
     }
@@ -1140,6 +1155,7 @@ final class IslandModel: ObservableObject {
     }
 
     func launch(_ url: URL) {
+        Usage.track(.appLaunched)
         let config = NSWorkspace.OpenConfiguration()
         config.activates = true
         NSWorkspace.shared.openApplication(at: url, configuration: config)
@@ -1211,6 +1227,7 @@ final class IslandModel: ObservableObject {
     // MARK: - Settings
 
     func openSettings() {
+        Usage.track(.settingsOpened)
         setHovering(false)
         SettingsWindow.shared.show(model: self)
     }
@@ -1218,6 +1235,7 @@ final class IslandModel: ObservableObject {
     // MARK: - Clipboard history
 
     func openClipboardSearch() {
+        Usage.track(.clipboardSearchOpened)
         setHovering(false)
         ClipboardSearchWindow.shared.show(history: clipboard, below: islandScreenRect?())
     }
@@ -1229,6 +1247,7 @@ final class IslandModel: ObservableObject {
     // MARK: - Cleaning mode
 
     func startCleaning(duration: TimeInterval? = nil) {
+        Usage.track(.cleaningStarted)
         setHovering(false)
         CleaningMode.shared.start(duration: duration ?? settings.cleaningDuration)
     }
@@ -1236,6 +1255,7 @@ final class IslandModel: ObservableObject {
     // MARK: - Color picker
 
     func pickColor() {
+        Usage.track(.colorPicked)
         setHovering(false)   // get out of the way of the loupe
         let sampler = NSColorSampler()
         colorSampler = sampler

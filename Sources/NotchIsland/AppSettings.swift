@@ -35,6 +35,8 @@ final class AppSettings: ObservableObject {
     @Published var petModel: String { didSet { save(petModel, "petModel") } }
     /// The pet now and then offers help on its own (tidy Downloads, screenshots…).
     @Published var petSuggestions: Bool { didSet { save(petSuggestions, "petSuggestions") } }
+    /// Count locally which features get used (Settings → Статистика).
+    @Published var usageStats: Bool { didSet { save(usageStats, "usageStats") } }
     /// The cat dresses for the occasion (headphones, glasses, nightcap, seasonal hats).
     @Published var petAccessories: Bool { didSet { save(petAccessories, "petAccessories") } }
     /// The cat's look (CatSkin id).
@@ -42,6 +44,7 @@ final class AppSettings: ObservableObject {
         didSet {
             save(catSkin, "catSkin")
             NotificationCenter.default.post(name: CatSkin.changed, object: nil)
+            DispatchQueue.main.async { Usage.track(.catSkinChanged) }
         }
     }
     /// Shrink the island to the notch while the active app's menus reach it.
@@ -100,8 +103,9 @@ final class AppSettings: ObservableObject {
         petSuggestions = bool("petSuggestions", true)
         petVoice = bool("petVoice", true)
         freeMenuBar = bool("freeMenuBar", true)
-        catSkin = d.string(forKey: "catSkin") ?? "chrome"   // closest to macOS materials
+        catSkin = d.string(forKey: "catSkin") ?? "soft"   // smoky glass, closest to the notch
         petAccessories = bool("petAccessories", true)
+        usageStats = bool("usageStats", true)
         clipboardEnabled = bool("clipboardEnabled", false)
         clipboardPaused = bool("clipboardPaused", false)
         clipboardMaxItems = d.object(forKey: "clipboardMaxItems") as? Int ?? 50
