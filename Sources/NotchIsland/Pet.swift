@@ -24,7 +24,7 @@ enum CatAccessory: String, Hashable, CaseIterable {
     case witchHat, santaHat, beanie   // seasonal
 }
 
-/// The pet's face at a fixed size (agent rows, cards, peeks): the same neon cat as `PetView`,
+/// The pet's face at a fixed size (agent rows, cards, peeks): the same cat as `PetView`,
 /// fitted to `size` points of height. In snapshot mode (ImageRenderer can't draw NSViews) a still
 /// image of the cat in that mood is shown instead.
 struct PetFace: View {

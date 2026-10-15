@@ -2,7 +2,7 @@ import AppKit
 import QuartzCore
 import SwiftUI
 
-/// The always-visible pet — a neon cat (see CatPet.swift), animated by Core Animation: the system
+/// The always-visible pet — a cat (see CatPet.swift), animated by Core Animation: the system
 /// render server runs the loops, so the app does no per-frame work. `size` is the old face height
 /// in points; the cat's head ends up about that tall.
 struct PetView: View {
