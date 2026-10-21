@@ -429,10 +429,13 @@ struct MediaPanel: View {
                             .accessibilityLabel(np.isShuffling ? "Перемешивание включено" : "Перемешивание выключено")
                     }
                     .overlay(alignment: .trailing) {
-                        IconButton(systemName: "list.bullet", size: 13) { model.togglePlaylist() }
-                            .foregroundStyle(model.showPlaylist ? Color.white : Color.white.opacity(0.55))
-                            .help("Плейлист")
-                            .accessibilityLabel("Плейлист")
+                        HStack(spacing: 10) {
+                            SpeakerButton(model: model, size: 13)
+                            IconButton(systemName: "list.bullet", size: 13) { model.togglePlaylist() }
+                                .foregroundStyle(model.showPlaylist ? Color.white : Color.white.opacity(0.55))
+                                .help("Плейлист")
+                                .accessibilityLabel("Плейлист")
+                        }
                     }
                     .padding(.bottom, -5) // optical: icon buttons carry 5pt of hit padding below the glyph
                 }
@@ -769,6 +772,8 @@ struct ToolsTab: View {
         HStack(spacing: 12) {
             ToolTile(symbol: "eyedropper.halffull", title: "Пипетка") { model.pickColor() }
             PomodoroTile(pomodoro: model.pomodoro)
+            ToolTile(symbol: "house.fill", title: "Дом") { model.openHome() }
+                .help("План квартиры и лампы Умного дома Яндекса")
             ToolTile(symbol: "bubbles.and.sparkles", title: "Чистка") { model.startCleaning() }
                 .help("Чёрный экран, клавиатура и трекпад отключены. Выход — удерживать Esc 2 с")
                 .contextMenu {
@@ -1336,5 +1341,36 @@ struct PillButton: View {
         }
         .buttonStyle(.plain)
         .onHover { hover = $0 }
+    }
+}
+
+/// Sends the Mac's sound to the Yandex speaker and back (shown once a speaker is paired).
+struct SpeakerButton: View {
+    @ObservedObject var model: IslandModel
+    @ObservedObject private var link = SpeakerLink.shared
+    var size: CGFloat = 13
+
+    var body: some View {
+        if link.isAvailable {
+            let active = link.isActive
+            Group {
+                if link.isBusy {
+                    ProgressView().controlSize(.mini).frame(width: size + 6, height: size + 6)
+                } else {
+                    IconButton(systemName: active ? "hifispeaker.fill" : "hifispeaker", size: size) { model.toggleSpeaker() }
+                        .foregroundStyle(active ? Color.white : Color.white.opacity(0.55))
+                }
+            }
+            .help(help(active: active))
+            .accessibilityLabel(active ? "Вернуть звук на Mac" : "Звук на Станцию")
+        }
+    }
+
+    private func help(active: Bool) -> String {
+        switch link.phase {
+        case .working(let text): return text
+        case .failed(let text) where !active: return text
+        default: return active ? "Звук играет на Станции — нажми, чтобы вернуть на Mac" : "Включить Bluetooth на Станции и играть звук через неё"
+        }
     }
 }

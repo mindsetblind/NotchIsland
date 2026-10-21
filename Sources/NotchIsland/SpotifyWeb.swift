@@ -471,7 +471,7 @@ final class SpotifyWeb {
     }
 }
 
-private extension Data {
+extension Data {
     var base64URL: String {
         base64EncodedString()
             .replacingOccurrences(of: "+", with: "-")
@@ -484,16 +484,17 @@ private extension Data {
 
 final class CallbackServer {
     private let port: UInt16
+    private let serviceName: String
     private var listener: NWListener?
 
-    init(port: UInt16) { self.port = port }
+    init(port: UInt16, serviceName: String = "Spotify") { self.port = port; self.serviceName = serviceName }
 
     func start(onCallback: @escaping ([String: String]) -> Void) throws {
         let params = NWParameters.tcp
         params.requiredLocalEndpoint = .hostPort(host: "127.0.0.1", port: NWEndpoint.Port(rawValue: port)!)
         params.allowLocalEndpointReuse = true
         let listener = try NWListener(using: params)
-        listener.newConnectionHandler = { conn in
+        listener.newConnectionHandler = { [serviceName] conn in
             conn.start(queue: .main)
             conn.receive(minimumIncompleteLength: 1, maximumLength: 16384) { data, _, _, _ in
                 let request = data.flatMap { String(data: $0, encoding: .utf8) } ?? ""
@@ -501,7 +502,7 @@ final class CallbackServer {
                 let path = request.split(separator: " ").dropFirst().first.map(String.init) ?? "/"
                 let isCallback = path.hasPrefix("/callback")
                 let body = isCallback
-                    ? "<html><meta charset=utf-8><body style='font:16px -apple-system;background:#000;color:#fff;display:grid;place-items:center;height:100vh;margin:0'>NotchIsland подключён к Spotify — вкладку можно закрыть.</body></html>"
+                    ? "<html><meta charset=utf-8><body style='font:16px -apple-system;background:#000;color:#fff;display:grid;place-items:center;height:100vh;margin:0'>NotchIsland подключён к \(serviceName) — вкладку можно закрыть.</body></html>"
                     : ""
                 let response = "HTTP/1.1 \(isCallback ? "200 OK" : "404 Not Found")\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: \(body.utf8.count)\r\nConnection: close\r\n\r\n\(body)"
                 conn.send(content: Data(response.utf8), completion: .contentProcessed { _ in conn.cancel() })

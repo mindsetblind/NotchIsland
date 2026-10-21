@@ -103,6 +103,7 @@ final class IslandModel: ObservableObject {
     var islandScreenRect: (() -> CGRect?)?
     private var claudeObserver: Any?
     private var pomodoroObserver: Any?
+    private var speakerObserver: Any?
     private var settingsObserver: Any?
     let settings = AppSettings.shared
     private var timers: [Timer] = []
@@ -124,6 +125,7 @@ final class IslandModel: ObservableObject {
         spotifyLoggedIn = spotify.isLoggedIn && !spotify.needsReauth
         spotifyHasClientID = spotify.clientID != nil
         // Island state depends on the timer, so re-render whenever it changes.
+        speakerObserver = SpeakerLink.shared.objectWillChange.sink { [weak self] in self?.objectWillChange.send() }
         pomodoroObserver = pomodoro.objectWillChange.sink { [weak self] in self?.objectWillChange.send() }
         petAssistantObserver = petAssistant.objectWillChange.sink { [weak self] in self?.objectWillChange.send() }
         petAssistant.music = PetMusicPlayer(
@@ -1232,6 +1234,28 @@ final class IslandModel: ObservableObject {
 
     func toggleClipboardSearch() {
         if ClipboardSearchWindow.shared.isOpen { ClipboardSearchWindow.shared.close() } else { openClipboardSearch() }
+    }
+
+    // MARK: - Smart home
+
+    func toggleSpeaker() {
+        let link = SpeakerLink.shared
+        if link.onNotice == nil {
+            link.onNotice = { [weak self] notice in
+                // Keep "working…" up until the next step replaces it.
+                self?.post(.device, "speaker", .notice(notice), duration: notice.spinning ? 30 : 4)
+            }
+        }
+        link.toggle()
+    }
+
+    func openHome() {
+        Usage.track(.homeOpened)
+        setHovering(false)
+        HomeWindow.shared.show(below: islandScreenRect?()) { [weak self] in
+            guard let self else { return }
+            SettingsWindow.shared.show(model: self)
+        }
     }
 
     // MARK: - Cleaning mode

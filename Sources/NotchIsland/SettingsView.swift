@@ -42,6 +42,7 @@ struct SettingsView: View {
             ClaudeSettings().tabItem { Label("Claude Code", systemImage: "eyes") }
             DeveloperSettings().tabItem { Label("Разработка", systemImage: "hammer") }
             ToolSettings(model: model).tabItem { Label("Инструменты", systemImage: "wrench.and.screwdriver") }
+            HomeSettings(home: SmartHomeController.shared).tabItem { Label("Дом", systemImage: "house") }
             UsageSettings().tabItem { Label("Статистика", systemImage: "chart.bar") }
             AboutSettings().tabItem { Label("О программе", systemImage: "info.circle") }
         }
@@ -526,5 +527,99 @@ private struct PetSettings: View {
             }
         }
         .formStyle(.grouped)
+    }
+}
+
+private struct HomeSettings: View {
+    @ObservedObject var home: SmartHomeController
+    @State private var clientID = ""
+    @State private var code = ""
+
+    var body: some View {
+        Form {
+            Section {
+                TextField("ClientID", text: $clientID, prompt: Text("из oauth.yandex.ru"))
+                    .onSubmit { home.setClientID(clientID) }
+                HStack {
+                    if home.loggedIn {
+                        Label("Вход выполнен", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
+                        Spacer()
+                        Button("Выйти") { home.logout() }
+                    } else {
+                        Text(home.hasClientID ? "Не выполнен вход" : "Сначала укажи ClientID")
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Button("Получить код") {
+                            home.setClientID(clientID)
+                            home.startCodeLogin()
+                        }
+                        .disabled(clientID.trimmingCharacters(in: .whitespaces).isEmpty)
+                        .help("Для приложения, у которого Callback URL — страница Яндекса для отладки")
+                        Button("Войти через Яндекс") {
+                            home.setClientID(clientID)
+                            home.login()
+                        }
+                        .disabled(clientID.trimmingCharacters(in: .whitespaces).isEmpty)
+                        .help("Для приложения с Callback URL \(YandexSmartHome.redirectURI)")
+                    }
+                }
+                if home.awaitingCode && !home.loggedIn {
+                    HStack {
+                        TextField("Код", text: $code, prompt: Text("код со страницы Яндекса"))
+                            .onSubmit { home.finishCodeLogin(code) }
+                        Button("Войти") { home.finishCodeLogin(code) }
+                            .disabled(code.trimmingCharacters(in: .whitespaces).isEmpty)
+                    }
+                }
+                if let error = home.error {
+                    Text(error).font(.caption).foregroundStyle(.orange)
+                }
+            } header: {
+                Text("Умный дом Яндекса")
+            } footer: {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("1. На oauth.yandex.ru создай приложение «Для доступа к API или отладки».")
+                    Text("2. Доступы: «Умный дом Яндекса» — просмотр и управление (iot:view, iot:control).")
+                    Text("3. Скопируй ClientID сюда. Если Callback URL приложения — \(YandexSmartHome.codePageURI), нажми «Получить код», разреши доступ и вставь код со страницы. Если \(YandexSmartHome.redirectURI) — «Войти через Яндекс».")
+                    Text("Ключ хранится в Связке ключей.")
+                    Text("Лампы и комнаты берутся из приложения «Дом с Алисой»; план открывается плиткой «Дом» во вкладке «Инструменты».")
+                }
+                .font(.caption).foregroundStyle(.secondary)
+            }
+            SpeakerSettings(home: home)
+        }
+        .formStyle(.grouped)
+        .onAppear { clientID = home.yandex.clientID ?? "" }
+    }
+}
+
+private struct SpeakerSettings: View {
+    @ObservedObject var home: SmartHomeController
+    @ObservedObject private var link = SpeakerLink.shared
+
+    var body: some View {
+        Section {
+            Picker("Колонка", selection: Binding(get: { link.device?.addressString ?? "" },
+                                                 set: { link.savedAddress = $0.isEmpty ? nil : $0 })) {
+                if link.device == nil { Text("Не выбрана").tag("") }
+                ForEach(link.paired, id: \.address) { d in Text(d.name).tag(d.address) }
+            }
+            Picker("Сценарий «включи блютуз»", selection: Binding(
+                get: { SpeakerMatch.scenario(in: home.snapshot.scenarios, savedID: link.savedScenarioID)?.id ?? "" },
+                set: { link.savedScenarioID = $0.isEmpty ? nil : $0 })) {
+                Text("Не запускать").tag("")
+                ForEach(home.snapshot.scenarios) { s in Text(s.name).tag(s.id) }
+            }
+            .disabled(!home.loggedIn)
+        } header: {
+            Text("Звук на Станцию")
+        } footer: {
+            Text("Кнопка с колонкой во вкладке «Музыка» и в «Доме»: запускает сценарий (в нём действие «Выполнить команду на устройстве: включи блютуз»), подключает Mac к Станции и переключает на неё звук. Повторное нажатие возвращает звук. Станцию нужно один раз сопрячь с Mac в Настройках → Bluetooth.")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+        .onAppear {
+            link.reloadPaired()
+            if home.snapshot.scenarios.isEmpty { home.refresh() }
+        }
     }
 }

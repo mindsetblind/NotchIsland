@@ -12,7 +12,7 @@ enum UsageEvent: String, CaseIterable {
     // Files
     case shelfAdded, airDrop, appLaunched
     // Tools
-    case pomodoroStarted, colorPicked, cleaningStarted
+    case pomodoroStarted, colorPicked, cleaningStarted, homeOpened, lampToggled, speakerConnected
     // Clipboard
     case clipboardCopied, clipboardSearchOpened
     // Pet
@@ -32,7 +32,7 @@ enum UsageEvent: String, CaseIterable {
              .tabClipboard, .tabAgents, .tabTools: return .island
         case .musicControl, .playlistOpened, .trackChosen: return .music
         case .shelfAdded, .airDrop, .appLaunched: return .files
-        case .pomodoroStarted, .colorPicked, .cleaningStarted: return .tools
+        case .pomodoroStarted, .colorPicked, .cleaningStarted, .homeOpened, .lampToggled, .speakerConnected: return .tools
         case .clipboardCopied, .clipboardSearchOpened: return .clipboard
         case .petPanelOpened, .petVoice, .petQuick, .petModel, .petPlanRun, .petUndo, .petMusic, .petTag,
              .petOfferShown, .petOfferAccepted, .catPetted, .catSkinChanged: return .pet
@@ -61,6 +61,9 @@ enum UsageEvent: String, CaseIterable {
         case .pomodoroStarted: return "Запустил помидор"
         case .colorPicked: return "Пипетка"
         case .cleaningStarted: return "Режим чистки"
+        case .homeOpened: return "Открыл «Дом»"
+        case .lampToggled: return "Управлял лампой"
+        case .speakerConnected: return "Звук на Станцию"
         case .clipboardCopied: return "Скопировал из истории буфера"
         case .clipboardSearchOpened: return "Поиск по буферу (⌃⌥V)"
         case .petPanelOpened: return "Позвал pet (⌥⇧Space)"

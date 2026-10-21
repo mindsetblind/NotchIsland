@@ -56,6 +56,19 @@ enum Snapshots {
             try? png.write(to: dir.appendingPathComponent(name + ".png"))
         }
 
+        let home = SmartHomeController.shared
+        home.showSample(HomeSnapshot(
+            rooms: [HomeRoom(id: "living", name: "Гостиная"), HomeRoom(id: "bed", name: "Спальня"), HomeRoom(id: "kitchen", name: "Кухня")],
+            lamps: [HomeLamp(id: "1", name: "Люстра", roomID: "living", isOn: true, brightness: 80, color: .temperature(3000), canDim: true,
+                             colorModel: "hsv", temperatureRange: 2700...6500),
+                    HomeLamp(id: "2", name: "Торшер", roomID: "living", isOn: true, brightness: 35, color: .hsv(h: 280, s: 80, v: 100), canDim: true, colorModel: "hsv"),
+                    HomeLamp(id: "3", name: "Ночник", roomID: "bed", isOn: false, brightness: 20, canDim: true),
+                    HomeLamp(id: "4", name: "Кухня", roomID: "kitchen", isOn: true, brightness: 100, color: .temperature(5600), canDim: true,
+                             temperatureRange: 2700...6500)]))
+        save("home", HomeView.size, HomeView(home: home, close: {}, openSettings: {}))
+        save("home-selected", HomeView.size, HomeViewSelected(home: home))
+        save("home-editing", HomeView.size, HomeViewEditing(home: home))
+
         model.claude.fillForSnapshots()
         Snapshots.fillDeveloperSample(model.developer.tracker)
         let now = Date()
