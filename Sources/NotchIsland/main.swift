@@ -143,7 +143,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Click on the collapsed island → open it. The click is consumed so nothing underneath reacts.
         NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown) { [weak self] event in
             let consumed = MainActor.assumeIsolated { () -> Bool in
+                // The permission card has its own buttons: let the click reach them.
                 guard let self, !self.model.isExpanded, !self.model.fileDragActive,
+                      self.model.state != .permission,
                       self.islandRect(padding: 8).contains(NSEvent.mouseLocation) else { return false }
                 self.model.openFromClick()
                 return true
