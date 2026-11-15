@@ -411,6 +411,7 @@ MainActor.assumeIsolated {
     PetPanelCapture.runIfRequested()
     PetAskBench.runIfRequested()
     SearchCapture.runIfRequested()
+    PortalCapture.runIfRequested()
     TabsCapture.runIfRequested()
     GazeBenchmark.runIfRequested()
     StatesBenchmark.runIfRequested()

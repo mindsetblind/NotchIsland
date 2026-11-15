@@ -35,6 +35,13 @@
 	<string>NotchIsland напоминает о ближайших событиях у выреза. События читаются только на этом Mac.</string>
 	<key>NSCalendarsUsageDescription</key>
 	<string>NotchIsland напоминает о ближайших событиях у выреза. События читаются только на этом Mac.</string>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_notch-portal._tcp</string>
+		<string>_notch-portal._udp</string>
+	</array>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>NotchIsland принимает фото и файлы с твоего iPhone (Portal) по локальной сети. Ничего не уходит в интернет.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Pet слушает, пока ты держишь ⌥⇧Space, и превращает речь в запрос. Звук никуда не отправляется.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>

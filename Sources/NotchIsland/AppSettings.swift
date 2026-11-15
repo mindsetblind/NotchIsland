@@ -94,6 +94,15 @@ final class AppSettings: ObservableObject {
     @Published var downloadsWatchEnabled: Bool { didSet { save(downloadsWatchEnabled, "downloadsWatchEnabled") } }
     @Published var calendarEnabled: Bool { didSet { save(calendarEnabled, "calendarEnabled") } }
     @Published var calendarLeadMinutes: Int { didSet { save(calendarLeadMinutes, "calendarLeadMinutes") } }
+    // Portal: files from an iPhone (off until the user turns it on — macOS asks for local-network access).
+    @Published var portalEnabled: Bool { didSet { save(portalEnabled, "portalEnabled") } }
+    /// Effect at the screen edge (PortalEffect raw value).
+    @Published var portalEffect: String { didSet { save(portalEffect, "portalEffect") } }
+    /// Destination folder; empty = ~/Downloads (read by PortalService.folder from any thread).
+    @Published var portalFolder: String { didSet { save(portalFolder, "portalFolder") } }
+    /// The fallback way in without the iOS app: `POST /upload` from iOS Shortcuts.
+    @Published var portalHTTPEnabled: Bool { didSet { save(portalHTTPEnabled, "portalHTTPEnabled") } }
+    @Published var portalHTTPPort: Int { didSet { save(portalHTTPPort, "portalHTTPPort") } }
     /// Picture shown instead of a cover that hasn't loaded (user's choice, else the bundled one).
     @Published private(set) var placeholderPicture: NSImage?
 
@@ -140,6 +149,11 @@ final class AppSettings: ObservableObject {
         downloadsWatchEnabled = bool("downloadsWatchEnabled", false)
         calendarEnabled = bool("calendarEnabled", false)
         calendarLeadMinutes = d.object(forKey: "calendarLeadMinutes") as? Int ?? 5
+        portalEnabled = bool("portalEnabled", false)
+        portalEffect = d.string(forKey: "portalEffect") ?? "vortex"
+        portalFolder = d.string(forKey: "portalFolder") ?? ""
+        portalHTTPEnabled = bool("portalHTTPEnabled", false)
+        portalHTTPPort = d.object(forKey: "portalHTTPPort") as? Int ?? 54321
         disabledActivities = Set((d.stringArray(forKey: "disabledActivities") ?? []).compactMap(ActivityKind.init(rawValue:)))
         liveActivityOrder = Self.normalizedOrder(d.stringArray(forKey: "liveActivityOrder")?.compactMap(ActivityKind.init(rawValue:)))
         placeholderPicture = Self.loadPlaceholder()
@@ -175,6 +189,21 @@ final class AppSettings: ObservableObject {
     }
 
     private func save(_ value: Any, _ key: String) { UserDefaults.standard.set(value, forKey: key) }
+
+    // MARK: Portal token
+
+    /// Shared secret for `POST /upload`, created on first use. Read from the HTTP queue too.
+    static var portalToken: String {
+        if let t = UserDefaults.standard.string(forKey: "portalToken"), !t.isEmpty { return t }
+        let t = PortalToken.generate()
+        UserDefaults.standard.set(t, forKey: "portalToken")
+        return t
+    }
+
+    func regeneratePortalToken() {
+        objectWillChange.send()
+        UserDefaults.standard.set(PortalToken.generate(), forKey: "portalToken")
+    }
 
     // MARK: Placeholder picture
 

@@ -9,6 +9,8 @@ public enum ActivityKind: String, CaseIterable, Codable, Sendable {
     case battery, device, color, clipboard, download, calendar, disk
     /// The pet offering help on its own (tidy Downloads…).
     case pet
+    /// A file flew in from an iPhone (Portal).
+    case portal
 
     /// Default order, highest first. Live activities can be re-ordered by the user (Settings).
     public var defaultPriority: Int {
@@ -18,6 +20,7 @@ public enum ActivityKind: String, CaseIterable, Codable, Sendable {
         case .calendar: return 80
         case .pomodoro: return 70
         case .battery: return 60
+        case .portal: return 55
         case .device: return 50
         case .disk: return 45
         case .download: return 40

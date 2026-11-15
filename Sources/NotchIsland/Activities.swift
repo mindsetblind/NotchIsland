@@ -62,6 +62,8 @@ struct Notice: Equatable {
     var tab: IslandTab?
     /// The pet's offer: a click opens the pet with this request (and its face replaces the symbol).
     var petRequest: String?
+    /// A received file (Portal): its thumbnail is shown on the right, a click opens it.
+    var file: URL?
 }
 
 typealias IslandActivities = ActivityCoordinator<IslandActivity>
@@ -111,7 +113,12 @@ struct NoticeView: View {
     }
 
     @ViewBuilder private var right: some View {
-        if let start = notice.startedAt {
+        if let file = notice.file {
+            HStack(spacing: 6) {
+                if let detail = notice.detail { Text(detail).foregroundStyle(.secondary) }
+                FileThumbnailView(url: file, side: 20)
+            }
+        } else if let start = notice.startedAt {
             // Updates once a second only while it's on screen.
             TimelineView(.periodic(from: .now, by: 1)) { ctx in
                 Text(formatElapsed(ctx.date.timeIntervalSince(start))).foregroundStyle(notice.tint.color)

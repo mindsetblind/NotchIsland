@@ -583,6 +583,13 @@ final class IslandModel: ObservableObject {
             petAssistant.ask(request)
             return
         }
+        // A file that just flew in: open it.
+        if let alert = activities.shownAlert, case .notice(let n) = alert.payload, let file = n.file {
+            withAnimation(Self.spring) { activities.dismiss(alert.id) }
+            setHoverHint(false)
+            NSWorkspace.shared.open(file)
+            return
+        }
         Usage.track(.islandOpenedClick)
         if let alert = activities.shownAlert, let tab = Self.tab(for: alert.payload) { selectTab(tab) }
         setHovering(true)
@@ -1441,6 +1448,13 @@ final class IslandModel: ObservableObject {
                                                                         title: url.lastPathComponent, detail: "загружено")),
                        duration: 3.5)
         }
+        PortalService.shared.onReceived = { [weak self] url, from in
+            self?.post(.portal, url.lastPathComponent, .notice(Notice(symbol: "sparkles", tint: .blue,
+                                                                     title: url.lastPathComponent, detail: from, file: url)),
+                       duration: 5)
+            self?.react(.happy, for: 2.5, after: 5)
+        }
+        PortalService.shared.start()
         calendar.onAlert = { [weak self] event, startingNow in
             let time = event.startDate.map { DateFormatter.localizedString(from: $0, dateStyle: .none, timeStyle: .short) } ?? ""
             self?.post(.calendar, event.calendarItemIdentifier, .notice(Notice(

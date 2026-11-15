@@ -10,7 +10,7 @@ enum UsageEvent: String, CaseIterable {
     // Music
     case musicControl, playlistOpened, trackChosen
     // Files
-    case shelfAdded, airDrop, appLaunched
+    case shelfAdded, airDrop, appLaunched, portalReceived
     // Tools
     case pomodoroStarted, colorPicked, cleaningStarted, homeOpened, lampToggled, speakerConnected
     // Clipboard
@@ -31,7 +31,7 @@ enum UsageEvent: String, CaseIterable {
         case .islandOpenedClick, .islandOpenedHover, .islandOpenedHotKey, .tabMusic, .tabApps, .tabShelf,
              .tabClipboard, .tabAgents, .tabTools: return .island
         case .musicControl, .playlistOpened, .trackChosen: return .music
-        case .shelfAdded, .airDrop, .appLaunched: return .files
+        case .shelfAdded, .airDrop, .appLaunched, .portalReceived: return .files
         case .pomodoroStarted, .colorPicked, .cleaningStarted, .homeOpened, .lampToggled, .speakerConnected: return .tools
         case .clipboardCopied, .clipboardSearchOpened: return .clipboard
         case .petPanelOpened, .petVoice, .petQuick, .petModel, .petPlanRun, .petUndo, .petMusic, .petTag,
@@ -57,6 +57,7 @@ enum UsageEvent: String, CaseIterable {
         case .trackChosen: return "Выбрал трек в плейлисте"
         case .shelfAdded: return "Положил файл на полку"
         case .airDrop: return "AirDrop через остров"
+        case .portalReceived: return "Принял файл через Portal"
         case .appLaunched: return "Запустил приложение из острова"
         case .pomodoroStarted: return "Запустил помидор"
         case .colorPicked: return "Пипетка"

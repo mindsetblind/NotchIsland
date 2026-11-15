@@ -43,6 +43,7 @@ struct SettingsView: View {
             DeveloperSettings().tabItem { Label("Разработка", systemImage: "hammer") }
             ToolSettings(model: model).tabItem { Label("Инструменты", systemImage: "wrench.and.screwdriver") }
             HomeSettings(home: SmartHomeController.shared).tabItem { Label("Дом", systemImage: "house") }
+            PortalSettings(portal: PortalService.shared).tabItem { Label("Portal", systemImage: "sparkles") }
             UsageSettings().tabItem { Label("Статистика", systemImage: "chart.bar") }
             AboutSettings().tabItem { Label("О программе", systemImage: "info.circle") }
         }
@@ -181,6 +182,7 @@ struct AlertToggle {
         AlertToggle(kind: .disk, title: "Мало места на диске (меньше 10 и 5 ГБ)"),
         AlertToggle(kind: .color, title: "Пипетка: цвет скопирован"),
         AlertToggle(kind: .clipboard, title: "Буфер: скопировано из истории"),
+        AlertToggle(kind: .portal, title: "Portal: файл прилетел с iPhone"),
     ]
 }
 
