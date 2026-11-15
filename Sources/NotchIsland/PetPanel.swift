@@ -210,7 +210,7 @@ struct PetPanelView: View {
 
     private var header: some View {
         HStack(spacing: 10) {
-            PetView(mood: assistant.mood, size: 20)
+            PetView(mood: assistant.mood, size: 20, extras: PetExtras(entrance: true))
             TextField("", text: $assistant.query,
                       prompt: Text(placeholder).foregroundStyle(.white.opacity(0.55)))
                 .textFieldStyle(.plain)
@@ -620,7 +620,7 @@ struct PetButtonStyle: ButtonStyle {
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .font(.system(size: 12, weight: .semibold))
+            .font(.system(size: 12))
             .foregroundStyle(primary ? .black : .white)
             .padding(.horizontal, 12).padding(.vertical, 5)
             .background(Capsule().fill(primary ? .white : .white.opacity(0.14)))

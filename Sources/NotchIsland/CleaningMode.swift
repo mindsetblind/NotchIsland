@@ -11,7 +11,7 @@ import SwiftUI
 final class CleaningMode: ObservableObject {
     static let shared = CleaningMode()
     static let durations: [TimeInterval] = [30, 60, 120]
-    static let escHoldSeconds: TimeInterval = 2
+    static let escHoldSeconds: TimeInterval = 1
 
     @Published private(set) var isActive = false
     @Published private(set) var endDate = Date()

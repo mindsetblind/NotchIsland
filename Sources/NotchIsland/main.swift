@@ -28,6 +28,42 @@ final class FirstMouseHostingView<Content: View>: NSHostingView<Content> {
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    private var swipeDX: CGFloat = 0, swipeDY: CGFloat = 0
+    private var swipeDone = false, swipeOverScroller = false
+
+    /// Trackpad swipe → neighbouring tab, once per gesture.
+    private func handleSwipe(_ event: NSEvent) -> Bool {
+        guard model.isExpanded, model.state == .expanded, event.hasPreciseScrollingDeltas else { return false }
+        if event.phase == .began {
+            swipeDX = 0; swipeDY = 0; swipeDone = false
+            swipeOverScroller = scrollsSideways(at: event.locationInWindow)
+        }
+        if swipeOverScroller { return false }
+        if event.phase == .changed || event.phase == .began {
+            swipeDX += event.scrollingDeltaX
+            swipeDY += event.scrollingDeltaY
+            if !swipeDone, abs(swipeDX) > 40, abs(swipeDX) > 1.5 * abs(swipeDY) {
+                swipeDone = true
+                // Where the fingers went, whatever the "natural scrolling" setting: left → next tab.
+                let finger = event.isDirectionInvertedFromDevice ? swipeDX : -swipeDX
+                model.selectAdjacentTab(finger < 0 ? 1 : -1)
+            }
+            return swipeDone
+        }
+        // Momentum after a tab switch shouldn't scroll whatever is under the pointer.
+        return swipeDone
+    }
+
+    /// The pointer is over a row that can itself scroll sideways (apps, shelf, colours).
+    private func scrollsSideways(at point: NSPoint) -> Bool {
+        var view = panel.contentView?.hitTest(point)
+        while let v = view {
+            if let sv = v as? NSScrollView, let doc = sv.documentView, doc.frame.width > sv.contentSize.width + 1 { return true }
+            view = v.superview
+        }
+        return false
+    }
+
     private var panel: IslandPanel!
     private let model = IslandModel()
     /// One-shot re-check while a hover delay is pending (expand after 0.15 s, collapse after 0.25 s).
@@ -37,6 +73,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var dragWatch: Timer?
     private var hotKey: HotKey?
     private var hotKeyObserver: Any?
+    private var screenChoiceObserver: Any?
     /// ⌃⌥V: clipboard history search (opt-in, see Settings).
     private var clipboardKey: HotKey?
     private var clipboardKeyObserver: Any?
@@ -70,6 +107,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NotificationCenter.default.addObserver(self, selector: #selector(layoutPanel),
                                                name: NSApplication.didChangeScreenParametersNotification,
                                                object: nil)
+        // Settings → Остров → Экран.
+        screenChoiceObserver = AppSettings.shared.$islandScreen.dropFirst().sink { [weak self] _ in
+            DispatchQueue.main.async { MainActor.assumeIsolated { self?.layoutPanel() } }
+        }
         // After sleep, a display may come back with another ID/frame, and the window server may have
         // reshuffled windows: lay out again and make sure the panel is ordered in.
         let ws = NSWorkspace.shared.notificationCenter
@@ -121,6 +162,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                         : nil
                 }
             }
+        DeskWidgetController.shared.start(model: model)
         PetPanelController.shared.placement = { [weak self] in
             guard let self, let screen = self.screen else { return nil }
             return (screen, self.model.notchSize)
@@ -156,6 +198,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             MainActor.assumeIsolated { self?.trackMouse() }
             return event
         }
+        // Two-finger horizontal swipe on the open island switches tabs (a row that scrolls sideways keeps it).
+        NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self] event in
+            let consumed = MainActor.assumeIsolated { self?.handleSwipe(event) ?? false }
+            return consumed ? nil : event
+        }
         model.onDragOutEnded = { [weak self] in self?.trackMouse() }
         stateObserver = model.objectWillChange.sink { [weak self] in
             DispatchQueue.main.async { MainActor.assumeIsolated { self?.updateSpaceKey() } }
@@ -179,7 +226,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return ScreenInfo(id: id, frame: screen.frame, visibleFrame: screen.visibleFrame,
                           safeTop: screen.safeAreaInsets.top,
                           auxLeftWidth: screen.auxiliaryTopLeftArea?.width,
-                          auxRightWidth: screen.auxiliaryTopRightArea?.width)
+                          auxRightWidth: screen.auxiliaryTopRightArea?.width,
+                          isBuiltIn: CGDisplayIsBuiltin(id) != 0)
     }
 
     /// Picks the display and moves the panel there. Called on every display change and after wake;
@@ -188,7 +236,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func layoutPanel() {
         let screens = NSScreen.screens
         let infos = screens.map(Self.info(for:))
-        guard let chosen = ScreenPlacement.pick(infos), let index = infos.firstIndex(of: chosen) else {
+        guard let chosen = ScreenPlacement.pick(infos, choice: AppSettings.shared.islandScreen,
+                                                mouse: NSEvent.mouseLocation),
+              let index = infos.firstIndex(of: chosen) else {
             // No displays at all (e.g. mid-reconfiguration while waking): keep the old placement.
             return
         }
@@ -197,7 +247,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if model.notchSize != notch { model.notchSize = notch }
         let frame = ScreenPlacement.panelFrame(canvas: canvasSize, on: chosen)
         if chosen != screenInfo || panel.frame != frame {
-            if let old = screenInfo, old.id != chosen.id { debugLog("island moved to display \(chosen.id)") }
+            if let old = screenInfo, old.id != chosen.id {
+                debugLog("island moved to display \(chosen.id)")
+                // Other menu bar, other menus under the ears.
+                DispatchQueue.main.async { MainActor.assumeIsolated { MenuBarWatcher.shared.check() } }
+            }
             panel.setFrame(frame, display: true)
         }
         screenInfo = chosen
@@ -286,14 +340,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         model.setPetGaze((raw * 4).rounded() / 4)   // quarter steps: no re-render on every pixel
     }
 
+    /// "Экран с курсором": the collapsed island hops to the display the pointer moved to. Never while
+    /// it's open, a file is being dragged or the pet is out — those stay where they started.
+    private func followMouseToAnotherDisplay(_ mouse: NSPoint) {
+        guard AppSettings.shared.islandScreen == .mouse, let info = screenInfo,
+              !ScreenPlacement.contains(info.frame, mouse),
+              !model.isExpanded, !model.fileDragActive, !PetPanelController.shared.isOpen else { return }
+        layoutPanel()
+    }
+
     private func islandRect(padding pad: CGFloat) -> CGRect {
         guard let screenInfo else { return .zero }
         return ScreenPlacement.islandRect(size: model.islandSize, padding: pad, on: screenInfo, shift: model.islandShift)
     }
 
     private func trackMouse() {
-        guard let screen = targetScreen else { return }
         let mouse = NSEvent.mouseLocation
+        followMouseToAnotherDisplay(mouse)
+        guard let screen = targetScreen else { return }
         updatePetGaze(mouse: mouse, screen: screen)
 
         if model.fileDragActive {
@@ -342,6 +406,7 @@ MainActor.assumeIsolated {
     Snapshots.runIfRequested()
     AnimationCapture.runIfRequested()
     PetCapture.runIfRequested()
+    IcosaPetScene.captureSheetIfRequested()
     CheckCapture.runIfRequested()
     PetPanelCapture.runIfRequested()
     PetAskBench.runIfRequested()

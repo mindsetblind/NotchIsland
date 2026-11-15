@@ -128,7 +128,7 @@ struct HomeView: View {
     private var header: some View {
         HStack(spacing: 10) {
             Image(systemName: "house.fill").foregroundStyle(.secondary)
-            Text("Дом").font(.system(size: 15, weight: .semibold))
+            Text("Дом").font(.system(size: 15))
             let on = home.snapshot.lamps.filter { $0.isOn == true }.count
             if home.loggedIn && !home.snapshot.lamps.isEmpty {
                 Text(on == 0 ? "всё выключено" : "горит \(on) из \(home.snapshot.lamps.count)")

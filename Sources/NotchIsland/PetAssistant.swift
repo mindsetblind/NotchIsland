@@ -645,11 +645,11 @@ final class PetAssistant: ObservableObject {
 
     /// The face in the panel.
     var mood: PetMood {
-        if voice.isListening { return .attention }
+        if voice.isListening { return .listening }
         switch phase {
         case .input: return .idle
-        case .thinking: return .working
-        case .plan: return planIsRunnable ? .attention : .idle
+        case .thinking: return .thinking
+        case .plan: return planIsRunnable ? .presenting : .idle
         case .done: return .happy
         case .playing: return .dancing
         case .failed, .notLoggedIn: return .idle
@@ -660,7 +660,7 @@ final class PetAssistant: ObservableObject {
     var earMood: PetMood? {
         guard !isOpen else { return nil }
         switch phase {
-        case .thinking: return .working
+        case .thinking: return .thinking
         case .plan: return planIsRunnable ? .attention : nil
         default: return nil
         }

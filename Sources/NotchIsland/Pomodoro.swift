@@ -226,11 +226,11 @@ struct PomodoroTile: View {
             let p = pomodoro
             VStack(spacing: 5) {
                 ZStack {
-                    PomodoroRing(progress: p.progress(at: ctx.date), color: p.phase.color, lineWidth: 4)
+                    PomodoroRing(progress: p.progress(at: ctx.date), color: p.phase.color, lineWidth: 1.5)
                         .animation(.linear(duration: 1), value: p.progress(at: ctx.date))
                     VStack(spacing: 1) {
                         Text(formatTimer(p.remaining(at: ctx.date)))
-                            .font(.system(size: 13, weight: .semibold, design: .rounded).monospacedDigit())
+                            .font(.system(size: 12, design: .monospaced))
                         Image(systemName: p.isRunning ? "pause.fill" : "play.fill")
                             .font(.system(size: 8))
                             .foregroundStyle(.secondary)
@@ -243,13 +243,13 @@ struct PomodoroTile: View {
                     Text(p.completedToday > 0 ? "\(p.phase.title) · 🍅\(p.completedToday)" : p.phase.title)
                     Text(p.phase.title)
                 }
-                .font(.system(size: 10, weight: .medium))
-                .foregroundStyle(.secondary)
+                .font(.system(size: 11))
+                .foregroundStyle(.white.opacity(0.45))
                 .lineLimit(1)
                 .padding(.horizontal, 6)
             }
             .frame(width: IslandModel.artworkSize, height: IslandModel.artworkSize)
-            .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(.white.opacity(hover ? 0.14 : 0.08)))
+            .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(.white.opacity(hover ? 0.05 : 0)))
             .overlay(alignment: .topLeading) {
                 if hover && !p.isFresh {
                     miniButton("arrow.counterclockwise", help: "Сбросить") { p.reset() }
@@ -312,7 +312,8 @@ struct PomodoroCompactView: View {
                         .font(.system(size: 12, weight: .semibold, design: .rounded).monospacedDigit())
                         .foregroundStyle(pomodoro.phase.color)
                     if model.showsPet {
-                        PetView(mood: model.petMood, size: 16, gaze: model.petGaze, accessories: model.petAccessories)
+                        PetView(mood: model.petMood, size: 16, gaze: model.petGaze, accessories: model.petAccessories,
+                                extras: PetExtras(progress: pomodoro.progress(at: ctx.date), agents: model.petAgents))
                     }
                 }
             }
@@ -326,16 +327,14 @@ struct PomodoroPeekView: View {
 
     var body: some View {
         EarsLayout(notchWidth: model.notchSize.width, height: model.notchSize.height) {
-            HStack(spacing: 6) {
-                Image(systemName: peek.phase.symbol).foregroundStyle(peek.phase.color)
-                Text(peek.title).lineLimit(1)
-            }
-            .font(.system(size: 12, weight: .semibold))
+            Text(peek.title.lowercased()).lineLimit(1)
+            .font(.system(size: 12))
+            .foregroundStyle(.white.opacity(0.75))
             .padding(.leading, 14)
             .frame(maxWidth: .infinity, alignment: .leading)
         } right: {
             Text(peek.subtitle)
-                .font(.system(size: 12, weight: .medium))
+                .font(.system(size: 12))
                 .foregroundStyle(peek.phase.color)
                 .lineLimit(1)
                 .padding(.trailing, 14)

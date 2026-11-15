@@ -145,7 +145,7 @@ struct ClipboardTab: View {
             HStack(spacing: 14) {
                 tile("doc.on.clipboard")
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("История буфера обмена").font(.system(size: 13, weight: .semibold))
+                    Text("История буфера обмена").font(.system(size: 13)).foregroundStyle(.white.opacity(0.75))
                     Text("Текст и ссылки хранятся только на этом Mac. Скрытое менеджерами паролей и похожее на токены не записывается.")
                         .font(.system(size: 11)).foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -172,7 +172,7 @@ struct ClipboardTab: View {
                 if store.items.isEmpty {
                     VStack(alignment: .leading, spacing: 4) {
                         Text(settings.clipboardPaused ? "Запись приостановлена" : "Пока пусто")
-                            .font(.system(size: 13, weight: .semibold))
+                            .font(.system(size: 13))
                         Text("Скопируй текст или ссылку — они появятся здесь. Клик по карточке копирует снова.")
                             .font(.system(size: 11)).foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
@@ -194,7 +194,7 @@ struct ClipboardTab: View {
     }
 
     private func tile(_ symbol: String) -> some View {
-        RoundedRectangle(cornerRadius: 14, style: .continuous).fill(.white.opacity(0.08))
+        RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(.white.opacity(0.1), lineWidth: 0.5)
             .frame(width: IslandModel.artworkSize, height: IslandModel.artworkSize)
             .overlay(Image(systemName: symbol).font(.system(size: 28)).foregroundStyle(.secondary))
     }
@@ -216,26 +216,27 @@ struct ClipCard: View {
                 Text(item.sourceApp ?? "").lineLimit(1)
                 Spacer(minLength: 0)
             }
-            .font(.system(size: 9.5, weight: .medium))
-            .foregroundStyle(.secondary)
+            .font(.system(size: 9.5))
+            .foregroundStyle(.white.opacity(0.4))
             Text(item.text.trimmingCharacters(in: .whitespacesAndNewlines))
                 .font(.system(size: 11))
-                .foregroundStyle(item.kind == .link ? Color(red: 0.55, green: 0.78, blue: 1) : .white)
+                .foregroundStyle(item.kind == .link ? Color(red: 0.55, green: 0.78, blue: 1).opacity(0.8) : .white.opacity(0.85))
                 .lineLimit(3)
                 .truncationMode(.tail)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             Text(item.copiedAt, style: .relative)
-                .font(.system(size: 9).monospacedDigit())
-                .foregroundStyle(.tertiary)
+                .font(.system(size: 9, design: .monospaced))
+                .foregroundStyle(.white.opacity(0.3))
                 .lineLimit(1)
         }
         .padding(8)
         .frame(width: width, height: IslandModel.artworkSize)
-        .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(.white.opacity(hover ? 0.13 : 0.07)))
+        .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(.white.opacity(hover ? 0.06 : 0)))
+        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(.white.opacity(0.1), lineWidth: 0.5))
         .overlay {
             if copied {
                 RoundedRectangle(cornerRadius: 12, style: .continuous).fill(.black.opacity(0.6))
-                    .overlay(Label("Скопировано", systemImage: "checkmark").font(.system(size: 11, weight: .semibold)))
+                    .overlay(Text("скопировано").font(.system(size: 11)))
                     .transition(.opacity)
             }
         }

@@ -68,6 +68,7 @@ enum Snapshots {
         save("home", HomeView.size, HomeView(home: home, close: {}, openSettings: {}))
         save("home-selected", HomeView.size, HomeViewSelected(home: home))
         save("home-editing", HomeView.size, HomeViewEditing(home: home))
+        save("desk-widget", DeskWidgetController.size, DeskWidgetView(model: model, state: DeskWidgetState()))
 
         model.claude.fillForSnapshots()
         Snapshots.fillDeveloperSample(model.developer.tracker)

@@ -116,6 +116,17 @@ final class IslandModel: ObservableObject {
     private var mediaFetchInFlight = false
     private var lastCommandAt = Date.distantPast
     private var expectedPlaying: (value: Bool, until: Date)?
+    /// Everything loaded in a player right now (Spotify, Music, a video), one per player.
+    private var mediaCandidates: [NowPlaying] = []
+    /// Players the island can switch between (the ⇄ button shows when there are two or more).
+    @Published private(set) var mediaSources: [MediaSource] = []
+    /// The player the island shows: the one you started last or switched to — not a fixed order,
+    /// so pausing a video doesn't swap it for a Spotify track that has been paused for an hour.
+    private var focusedSource: MediaSource?
+    private var playingSources: Set<MediaSource> = []
+    /// Players we just paused for you: they may still report "playing" for a moment, which must
+    /// not count as you starting them again (or the two would keep pausing each other).
+    private var autoPausedAt: [MediaSource: Date] = [:]
     private var lastListReloadKey: String?
     /// Track the queue-skipper is currently heading to (shown with a spinner in the list).
     @Published private(set) var skipTargetID: String?
@@ -262,7 +273,7 @@ final class IslandModel: ObservableObject {
     static let inset: CGFloat = 22          // left/right padding of everything inside
     static let artworkSize: CGFloat = 92
     static let contentTop: CGFloat = 10     // below the header row (its text already sits mid-row)
-    static let contentBottom: CGFloat = 20
+    static let contentBottom: CGFloat = 28   // room for the tab dashes
     static let playlistHeight: CGFloat = 230
 
     /// Width of each "ear" when only the pet is shown (it sits in the right one).
@@ -337,6 +348,9 @@ final class IslandModel: ObservableObject {
         if isSleepy { return .sleeping }
         return .idle
     }
+
+    /// Claude Code sessions in progress: satellites around the icosahedron.
+    var petAgents: Int { claude.sessions.filter { $0.status == .working || $0.status == .waiting }.count }
 
     /// What the cat wears right now: glasses while builds/agents work, a nightcap when asleep,
     /// otherwise a seasonal hat.
@@ -467,6 +481,9 @@ final class IslandModel: ObservableObject {
                 MainActor.assumeIsolated { self?.mediaDidNotify() }
             }
         }
+        // Videos in a browser (YouTube): the bridge pushes every change, no polling needed.
+        media.browser.onChange = { [weak self] in self?.mediaDidNotify() }
+        media.browser.start()
         let poll = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.pollMediaIfDue() }
         }
@@ -526,6 +543,15 @@ final class IslandModel: ObservableObject {
             hoverHint = false
             if !value { showPlaylist = false; pinnedOpen = false }
         }
+    }
+
+    /// Next (+1) or previous (-1) tab — a two-finger swipe on the open island.
+    func selectAdjacentTab(_ step: Int) {
+        let tabs = visibleTabs
+        guard let i = tabs.firstIndex(of: selectedTab) else { return }
+        let j = i + step
+        guard tabs.indices.contains(j) else { return }
+        selectTab(tabs[j])
     }
 
     func selectTab(_ tab: IslandTab) {
@@ -631,16 +657,62 @@ final class IslandModel: ObservableObject {
                     return
                 }
                 self.recordHealth(poll.access)
-                var np = poll.nowPlaying
-                // The current track's player was skipped this time (backing off): keep what we know.
-                if np == nil, let current = self.nowPlaying, skip.contains(current.source) { np = current }
-                self.apply(np)
+                // The shown player was skipped this time (backing off): keep what we know about it.
+                var candidates = poll.candidates
+                if let current = self.nowPlaying, skip.contains(current.source),
+                   !candidates.contains(where: { $0.source == current.source }) {
+                    candidates.append(current)
+                }
+                self.apply(self.choose(from: candidates))
             }
         }
     }
 
     /// Snapshot mode needs the result right away.
-    func refreshMediaNow() { apply(media.fetch().nowPlaying) }
+    func refreshMediaNow() { apply(choose(from: media.fetch().candidates)) }
+
+    /// Picks what the island shows. A player that has just started takes focus (and, with
+    /// "one at a time", pauses the others); otherwise the focused player stays, playing or not.
+    private func choose(from candidates: [NowPlaying]) -> NowPlaying? {
+        var candidates = candidates
+        let now = Date()
+        autoPausedAt = autoPausedAt.filter { now.timeIntervalSince($0.value) < 2.5 }
+        let playing = Set(candidates.filter(\.isPlaying).map(\.source)).subtracting(autoPausedAt.keys)
+        let started = playing.subtracting(playingSources)
+        playingSources = playing
+        if let source = started.first(where: { $0 != focusedSource }) ?? started.first {
+            focusedSource = source
+            if settings.onePlayerAtATime {
+                for other in playing where other != source {
+                    media.pause(other)
+                    autoPausedAt[other] = now
+                    playingSources.remove(other)
+                    if let i = candidates.firstIndex(where: { $0.source == other }) { candidates[i].isPlaying = false }
+                }
+            }
+        }
+        for source in autoPausedAt.keys {
+            if let i = candidates.firstIndex(where: { $0.source == source }) { candidates[i].isPlaying = false }
+        }
+        mediaCandidates = candidates
+        let sources = candidates.map(\.source)
+        if sources != mediaSources { withAnimation(Self.spring) { mediaSources = sources } }
+        let chosen = candidates.first { $0.source == focusedSource }
+            ?? candidates.first(where: \.isPlaying) ?? candidates.first
+        if let chosen { focusedSource = chosen.source }
+        return chosen
+    }
+
+    /// ⇄ in the player: show the next player (e.g. the paused video instead of Spotify).
+    func switchMediaSource() {
+        guard mediaCandidates.count > 1 else { return }
+        let i = mediaCandidates.firstIndex { $0.source == nowPlaying?.source } ?? -1
+        let next = mediaCandidates[(i + 1) % mediaCandidates.count]
+        focusedSource = next.source
+        expectedPlaying = nil
+        apply(next)
+        refreshMedia()
+    }
 
     private func recordHealth(_ access: [MediaSource: PlayerAccess]) {
         let now = Date()
@@ -685,7 +757,10 @@ final class IslandModel: ObservableObject {
             }
         }
         if np != nowPlaying {
-            withAnimation(Self.spring) { nowPlaying = np }
+            withAnimation(Self.spring) {
+                nowPlaying = np
+                if np?.source == .youtube { showPlaylist = false }
+            }
         }
         guard let np else {
             artworkKey = nil
@@ -765,6 +840,7 @@ final class IslandModel: ObservableObject {
             loadMusicPlaylist()
             return
         }
+        if nowPlaying?.source == .youtube { return }   // a video has no playlist we can read
         guard spotifyHasClientID, spotifyLoggedIn else { return }
         playlistTask?.cancel()
         playlistLoading = true

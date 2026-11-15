@@ -10,9 +10,10 @@ struct PetView: View {
     var size: CGFloat = 17
     var gaze: CGFloat? = nil
     var accessories: Set<CatAccessory> = []
+    var extras = PetExtras()
 
     var body: some View {
-        CatView(mood: mood, pointsPerCSSPixel: size / 30, gaze: gaze, accessories: accessories)
+        PetAvatar(mood: mood, catK: size / 30, gaze: gaze, accessories: accessories, extras: extras)
             .frame(width: size * 1.6, height: size * 1.3)
     }
 }

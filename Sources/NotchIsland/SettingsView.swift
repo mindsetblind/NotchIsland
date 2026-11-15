@@ -70,6 +70,11 @@ private struct GeneralSettings: View {
                      ? "При наведении остров слегка приподнимается, раскрывается по клику."
                      : "Остров раскрывается сам, когда задерживаешь на нём курсор.")
                     .font(.callout).foregroundStyle(.secondary)
+                Picker("Экран", selection: $settings.islandScreen) {
+                    ForEach(IslandScreenChoice.allCases, id: \.self) { Text(AppSettings.title($0)).tag($0) }
+                }
+                Text("На экране без выреза остров — небольшая «пилюля» высотой со строку меню по центру верхнего края.")
+                    .font(.callout).foregroundStyle(.secondary)
             }
             Section("Строка меню") {
                 Toggle("Уступать место длинному меню приложений", isOn: $settings.freeMenuBar)
@@ -104,6 +109,9 @@ struct PeekSettings: View {
             Section("Пока остров свёрнут") {
                 Toggle("Обложка и эквалайзер, когда играет музыка", isOn: $settings.showCompactMusic)
                 Toggle("Таймер помидора", isOn: $settings.showCompactPomodoro)
+            }
+            Section("Музыка и видео") {
+                Toggle("Играет что-то одно: Spotify ставит видео на паузу и наоборот", isOn: $settings.onePlayerAtATime)
             }
             Section("Короткие уведомления у выреза") {
                 Toggle("Подключение зарядки", isOn: $settings.showChargingPeek)
@@ -503,13 +511,24 @@ private struct PetSettings: View {
 
     var body: some View {
         Form {
-            Section("Кот") {
-                CatSkinPicker(selection: $settings.catSkin)
-                Toggle("Аксессуары по ситуации", isOn: $settings.petAccessories)
-                    .help("Очки во время сборок и работы Claude, колпак во сне, шапки по сезону")
+            Section("Пет") {
+                Picker("Вид", selection: $settings.petStyle) {
+                    ForEach(PetStyle.allCases) { Text($0.title).tag($0.rawValue) }
+                }
+                .pickerStyle(.segmented)
+                if settings.petStyle == PetStyle.cat.rawValue {
+                    CatSkinPicker(selection: $settings.catSkin)
+                }
+                Toggle(settings.petStyle == PetStyle.cat.rawValue ? "Аксессуары по ситуации" : "Сезонные эффекты и скан при сборках",
+                       isOn: $settings.petAccessories)
+                    .help(settings.petStyle == PetStyle.cat.rawValue
+                          ? "Очки во время сборок и работы Claude, колпак во сне, шапки по сезону"
+                          : "Сканирующая волна во время сборок и работы Claude; снег зимой, искры на Хэллоуин и Новый год")
                 Toggle("Всегда виден справа от выреза", isOn: $settings.petAlwaysVisible)
                 Toggle("Засыпает ночью (с 1 до 6)", isOn: $settings.petSleepsAtNight)
                     .disabled(!settings.petAlwaysVisible)
+                Toggle("Виджет на рабочем столе", isOn: $settings.deskWidget)
+                    .help("Карточка с петом, временем и тем, чем он занят. Перетаскивается мышью; правый клик — меню")
                 Text("Следит за курсором, танцует под музыку, «думает», пока работает Claude Code, зовёт, когда он ждёт ответа, и засыпает, если долго не трогать Mac.")
                     .font(.callout).foregroundStyle(.secondary)
             }

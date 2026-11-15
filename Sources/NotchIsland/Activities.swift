@@ -90,13 +90,11 @@ struct NoticeView: View {
                     SpinnerView(color: notice.tint.color).frame(width: 14, height: 14)
                 } else if notice.petRequest != nil {
                     PetView(mood: .attention, size: 14)
-                } else {
-                    Image(systemName: notice.symbol)
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(notice.tint.color)
                 }
-                Text(notice.title)
-                    .font(.system(size: 12, weight: .medium))
+                // Quiet: no icon, the title in plain text; colour is left to the value on the right.
+                Text(notice.title.lowercased())
+                    .font(.system(size: 12))
+                    .foregroundStyle(.white.opacity(0.75))
                     .lineLimit(1)
                     .truncationMode(.middle)
             }
@@ -104,7 +102,7 @@ struct NoticeView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         } right: {
             right
-                .font(.system(size: 12, weight: .semibold).monospacedDigit())
+                .font(.system(size: 12).monospacedDigit())
                 .lineLimit(1)
                 .padding(.trailing, 14)
                 .frame(maxWidth: .infinity, alignment: .trailing)

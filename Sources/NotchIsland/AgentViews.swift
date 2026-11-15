@@ -14,7 +14,7 @@ struct PermissionCardView: View {
             EarsLayout(notchWidth: model.notchSize.width, height: model.notchSize.height) {
                 HStack(spacing: 8) {
                     PetFace(mood: .attention, size: 15)
-                    Text(ask.project).font(.system(size: 12, weight: .semibold)).lineLimit(1)
+                    Text(ask.project).font(.system(size: 12)).lineLimit(1)
                 }
                 .padding(.leading, IslandModel.inset - 4)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -27,7 +27,7 @@ struct PermissionCardView: View {
             }
 
             VStack(alignment: .leading, spacing: 8) {
-                Text(ask.title).font(.system(size: 14, weight: .semibold))
+                Text(ask.title).font(.system(size: 14))
                 Text(ask.detail.isEmpty ? ask.toolName : ask.detail)
                     .font(.system(size: 11, design: .monospaced))
                     .lineLimit(2)
@@ -71,11 +71,12 @@ private struct AnswerButton: View {
     var body: some View {
         Button(action: action) {
             Text(title)
-                .font(.system(size: 12, weight: .semibold))
+                .font(.system(size: 12))
                 .foregroundStyle(style == .primary ? Color.black : Color.white)
                 .padding(.horizontal, 14)
                 .padding(.vertical, 6)
-                .background(Capsule().fill(style == .primary ? Color.white.opacity(hover ? 0.85 : 1) : Color.white.opacity(hover ? 0.2 : 0.12)))
+                .background(Capsule().fill(style == .primary ? Color.white.opacity(hover ? 0.85 : 1) : Color.white.opacity(hover ? 0.08 : 0)))
+                .overlay(Capsule().strokeBorder(.white.opacity(style == .primary ? 0 : 0.25), lineWidth: 0.5))
                 .contentShape(Capsule())
         }
         .buttonStyle(.plain)
@@ -99,7 +100,8 @@ struct AgentCompactView: View {
                     AgentStatusGlyph(mood: claude.mood)
                 }
             } right: {
-                PetView(mood: model.petMood, size: 17, gaze: model.petGaze, accessories: model.petAccessories)
+                PetView(mood: model.petMood, size: 17, gaze: model.petGaze, accessories: model.petAccessories,
+                        extras: PetExtras(agents: model.petAgents))
             }
         } else {
             EarsLayout(notchWidth: model.notchSize.width, height: model.notchSize.height) {
@@ -163,7 +165,7 @@ struct AgentPeekView: View {
         EarsLayout(notchWidth: model.notchSize.width, height: model.notchSize.height) {
             HStack(spacing: 8) {
                 PetFace(mood: peek.mood, size: 16)
-                Text(peek.project).font(.system(size: 12, weight: .semibold)).lineLimit(1)
+                Text(peek.project).font(.system(size: 12)).foregroundStyle(.white.opacity(0.75)).lineLimit(1)
             }
             .padding(.leading, 12)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -311,7 +313,7 @@ struct AgentsTab: View {
                     faceTile(.sleeping)
                     VStack(alignment: .leading, spacing: 10) {
                         Text("Подключи Claude Code — остров покажет, что делает агент, и спросит разрешения")
-                            .font(.system(size: 13, weight: .semibold))
+                            .font(.system(size: 13))
                             .fixedSize(horizontal: false, vertical: true)
                         PillButton(title: "Подключить") {
                             ClaudeHooks.install()
@@ -324,7 +326,7 @@ struct AgentsTab: View {
                 HStack(spacing: 14) {
                     faceTile(.idle)
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("Нет активных сессий").font(.system(size: 13, weight: .semibold))
+                        Text("Нет активных сессий").font(.system(size: 13))
                         Text("Запусти Claude Code — сессии появятся здесь")
                             .font(.system(size: 11)).foregroundStyle(.secondary)
                     }
@@ -367,7 +369,7 @@ private struct InteractivePet: View {
 
     var body: some View {
         GeometryReader { geo in
-            PetFace(mood: reaction ?? mood, size: 34, gaze: gaze)
+            PetFace(mood: reaction ?? mood, size: 56, gaze: gaze)
                 .frame(width: geo.size.width, height: geo.size.height)
                 .contentShape(Rectangle())
                 .onContinuousHover { phase in
@@ -381,8 +383,8 @@ private struct InteractivePet: View {
                 }
                 .onTapGesture(count: 2) { summon() }
                 .onTapGesture { pet() }
-                .help("Погладь кота · двойной клик — позвать pet (⌥⇧Space)")
-                .accessibilityLabel("Кот")
+                .help("Погладь пета · двойной клик — позвать его (⌥⇧Space)")
+                .accessibilityLabel("Пет")
                 .accessibilityHint("Нажми, чтобы погладить; двойное нажатие зовёт помощника")
         }
     }
@@ -421,7 +423,7 @@ private struct SessionRow: View {
         HStack(spacing: 10) {
             PetFace(mood: mood, size: 12).frame(width: 22)
             VStack(alignment: .leading, spacing: 1) {
-                Text(session.project).font(.system(size: 12, weight: .semibold)).lineLimit(1)
+                Text(session.project).font(.system(size: 12)).lineLimit(1)
                 Text(session.activity).font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
             }
             Spacer(minLength: 6)

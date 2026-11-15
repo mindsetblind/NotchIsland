@@ -17,6 +17,8 @@ ditto $BIN/Sparkle.framework $APP/Contents/Frameworks/Sparkle.framework
 rm -rf $APP/Contents/Frameworks/Sparkle.framework/Versions/B/XPCServices $APP/Contents/Frameworks/Sparkle.framework/XPCServices
 cp Info.plist $APP/Contents/
 cp Icon/AppIcon.icns $APP/Contents/Resources/
+# Reads the system Now Playing (YouTube in a browser); loaded into /usr/bin/perl at runtime.
+clang -dynamiclib -fobjc-arc -O2 -arch arm64 -arch x86_64 -framework Foundation -o $APP/Contents/Resources/NowPlayingBridge.dylib Helper/NowPlayingBridge.m
 # No Resources/placeholder.* here: that's your own media. Settings let the recipient pick theirs.
 
 # Ad-hoc signature: without a paid Developer ID the app can't be notarized anyway, and a personal

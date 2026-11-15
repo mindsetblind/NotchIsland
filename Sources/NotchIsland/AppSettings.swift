@@ -6,6 +6,15 @@ import SwiftUI
 final class AppSettings: ObservableObject {
     static let shared = AppSettings()
 
+    static func title(_ choice: IslandScreenChoice) -> String {
+        switch choice {
+        case .external: "Внешний монитор, если подключён"
+        case .primary:  "Основной экран (со строкой меню)"
+        case .notch:    "Экран с вырезом"
+        case .mouse:    "Экран с курсором"
+        }
+    }
+
     enum OpenMode: String, CaseIterable, Identifiable {
         case click, hover
         var id: String { rawValue }
@@ -13,8 +22,12 @@ final class AppSettings: ObservableObject {
     }
 
     @Published var openMode: OpenMode { didSet { save(openMode.rawValue, "openMode") } }
+    /// Which display the island lives on; by default an external monitor once one is plugged in.
+    @Published var islandScreen: IslandScreenChoice { didSet { save(islandScreen.rawValue, "islandScreen") } }
     @Published var hotKeyEnabled: Bool { didSet { save(hotKeyEnabled, "hotKeyEnabled") } }
     @Published var showCompactMusic: Bool { didSet { save(showCompactMusic, "showCompactMusic") } }
+    /// Starting Spotify pauses a YouTube video and vice versa — only one plays at a time.
+    @Published var onePlayerAtATime: Bool { didSet { save(onePlayerAtATime, "onePlayerAtATime") } }
     @Published var showCompactPomodoro: Bool { didSet { save(showCompactPomodoro, "showCompactPomodoro") } }
     @Published var showChargingPeek: Bool { didSet { save(showChargingPeek, "showChargingPeek") } }
     @Published var showBluetoothPeek: Bool { didSet { save(showBluetoothPeek, "showBluetoothPeek") } }
@@ -39,6 +52,10 @@ final class AppSettings: ObservableObject {
     @Published var usageStats: Bool { didSet { save(usageStats, "usageStats") } }
     /// The cat dresses for the occasion (glasses, nightcap, seasonal hats).
     @Published var petAccessories: Bool { didSet { save(petAccessories, "petAccessories") } }
+    /// The pet also lives in a small card on the desktop (see DeskWidget.swift).
+    @Published var deskWidget: Bool { didSet { save(deskWidget, "deskWidget") } }
+    /// What the pet is: "icosa" (glowing icosahedron) or "cat".
+    @Published var petStyle: String { didSet { save(petStyle, "petStyle") } }
     /// The cat's look (CatSkin id).
     @Published var catSkin: String {
         didSet {
@@ -84,8 +101,10 @@ final class AppSettings: ObservableObject {
         let d = UserDefaults.standard
         func bool(_ key: String, _ fallback: Bool) -> Bool { d.object(forKey: key) as? Bool ?? fallback }
         openMode = OpenMode(rawValue: d.string(forKey: "openMode") ?? "") ?? .click
+        islandScreen = IslandScreenChoice(rawValue: d.string(forKey: "islandScreen") ?? "") ?? .external
         hotKeyEnabled = bool("hotKeyEnabled", true)
         showCompactMusic = bool("showCompactMusic", true)
+        onePlayerAtATime = bool("onePlayerAtATime", true)
         showCompactPomodoro = bool("showCompactPomodoro", true)
         showChargingPeek = bool("showChargingPeek", true)
         showBluetoothPeek = bool("showBluetoothPeek", true)
@@ -103,8 +122,10 @@ final class AppSettings: ObservableObject {
         petSuggestions = bool("petSuggestions", true)
         petVoice = bool("petVoice", true)
         freeMenuBar = bool("freeMenuBar", true)
+        petStyle = d.string(forKey: "petStyle") ?? "icosa"
         catSkin = d.string(forKey: "catSkin") ?? "soft"   // smoky glass, closest to the notch
         petAccessories = bool("petAccessories", true)
+        deskWidget = bool("deskWidget", false)
         usageStats = bool("usageStats", true)
         clipboardEnabled = bool("clipboardEnabled", false)
         clipboardPaused = bool("clipboardPaused", false)

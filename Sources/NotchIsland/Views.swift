@@ -231,7 +231,8 @@ struct CompactMusicView: View {
         } right: {
             if model.showsPet {
                 // The pet's eyes bounce like equalizer bars while music plays.
-                PetView(mood: model.petMood, size: 17, gaze: model.petGaze, accessories: model.petAccessories)
+                PetView(mood: model.petMood, size: 17, gaze: model.petGaze, accessories: model.petAccessories,
+                        extras: PetExtras(agents: model.petAgents))
             } else {
                 EqualizerView(isPlaying: model.nowPlaying?.isPlaying ?? false, tint: .white)
                     .frame(width: 22, height: 17)
@@ -249,7 +250,8 @@ struct PetEarView: View {
         // is centred in it — its whiskers already keep clear of the notch edge.
         HStack(spacing: 0) {
             Spacer().frame(width: model.notchSize.width)
-            PetView(mood: model.petMood, size: 17, gaze: model.petGaze, accessories: model.petAccessories)
+            PetView(mood: model.petMood, size: 17, gaze: model.petGaze, accessories: model.petAccessories,
+                    extras: PetExtras(agents: model.petAgents, entrance: PetEntrance.once(), easterEgg: true))
                 .frame(maxWidth: .infinity)
         }
         .frame(height: model.notchSize.height)
@@ -261,14 +263,11 @@ struct ChargingPeekView: View {
 
     var body: some View {
         EarsLayout(notchWidth: model.notchSize.width, height: model.notchSize.height) {
-            HStack(spacing: 5) {
-                Image(systemName: "bolt.fill").foregroundStyle(.green)
-                Text("Зарядка").font(.system(size: 12, weight: .medium))
-            }
+            Text("зарядка").font(.system(size: 12)).foregroundStyle(.white.opacity(0.75))
         } right: {
             HStack(spacing: 6) {
                 Text("\(model.battery.level)%")
-                    .font(.system(size: 12, weight: .semibold).monospacedDigit())
+                    .font(.system(size: 12).monospacedDigit())
                     .foregroundStyle(.green)
                 BatteryGlyph(battery: model.battery)
             }
@@ -280,20 +279,25 @@ struct ChargingPeekView: View {
 
 struct ExpandedView: View {
     @ObservedObject var model: IslandModel
+    /// The tab whose dot is under the pointer: its name shows in the header.
+    @State private var hoveredTab: IslandTab?
 
     var body: some View {
         VStack(spacing: 0) {
+            // Quiet header: the pet acting out the tab (or the dash you point at), settings and quit.
             EarsLayout(notchWidth: model.notchSize.width, height: model.notchSize.height) {
-                TabBar(model: model)
-                    .padding(.leading, IslandModel.inset - 10)
+                TabPet(model: model, claude: model.claude, tab: hoveredTab ?? model.selectedTab)
+                    .padding(.leading, IslandModel.inset - 4)
                     .frame(maxWidth: .infinity, alignment: .leading)
             } right: {
                 HStack(spacing: 0) {
                     Spacer()
-                    IconButton(systemName: "gearshape", size: 11) { model.openSettings() }
+                    IconButton(systemName: "gearshape", size: 10) { model.openSettings() }
+                        .foregroundStyle(.white.opacity(0.45))
                         .help("Настройки")
                         .accessibilityLabel("Настройки")
-                    IconButton(systemName: "power", size: 11) { NSApp.terminate(nil) }
+                    IconButton(systemName: "power", size: 10) { NSApp.terminate(nil) }
+                        .foregroundStyle(.white.opacity(0.45))
                         .help("Выйти")
                         .accessibilityLabel("Выйти из NotchIsland")
                 }
@@ -317,6 +321,9 @@ struct ExpandedView: View {
             .padding(.horizontal, IslandModel.inset)
             .padding(.top, IslandModel.contentTop)
             .padding(.bottom, IslandModel.contentBottom)
+            .overlay(alignment: .bottom) {
+                TabBar(model: model, hovered: $hoveredTab).padding(.bottom, 4)
+            }
 
             if model.selectedTab == .music && model.showPlaylist {
                 PlaylistPanel(model: model)
@@ -329,38 +336,64 @@ struct ExpandedView: View {
     }
 }
 
-struct TabBar: View {
+/// The pet in the header, doing what the tab is about: dancing to music, apps orbiting it, hungry for
+/// files (or full of them), copies rolling over it, thinking with the agents, being built for tools.
+struct TabPet: View {
     @ObservedObject var model: IslandModel
-    @Namespace private var ns
+    @ObservedObject var claude: ClaudeMonitor
+    let tab: IslandTab
 
     var body: some View {
-        HStack(spacing: 1) {
+        PetView(mood: mood, size: 15, extras: PetExtras(agents: tab == .apps ? 3 : 0, motif: motif))
+            .accessibilityLabel(tab.title)
+    }
+
+    private var mood: PetMood {
+        switch tab {
+        case .music: return model.nowPlaying?.isPlaying == true ? .dancing : .idle
+        case .apps, .clipboard, .tools: return .idle
+        case .shelf: return model.shelf.isEmpty ? .hungry : .full
+        case .agents: return claude.isAnyWaiting ? .attention : claude.isAnyWorking ? .thinking : .idle
+        }
+    }
+
+    private var motif: IcosaMotif {
+        switch tab {
+        case .clipboard: return .ripple
+        case .tools: return .build
+        default: return .none
+        }
+    }
+}
+
+/// Tabs as a row of short dashes under the content: the current one is long and white.
+/// Pointing at a dash shows the tab's name in the header.
+struct TabBar: View {
+    @ObservedObject var model: IslandModel
+    @Binding var hovered: IslandTab?
+
+    var body: some View {
+        HStack(spacing: 0) {
             ForEach(model.visibleTabs) { tab in
                 let selected = model.selectedTab == tab
+                let lit = selected || hovered == tab
+                // A file waits on the shelf: its dash stays a little brighter.
+                let waiting = tab == .shelf && !model.shelf.isEmpty
                 Button { model.selectTab(tab) } label: {
-                    Image(systemName: tab.symbol)
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(.white.opacity(selected ? 1 : 0.45))
-                        .frame(width: 22, height: 22)
-                        .background {
-                            if selected {
-                                Capsule().fill(.white.opacity(0.15))
-                                    .matchedGeometryEffect(id: "selectedTab", in: ns)
-                            }
-                        }
-                        .overlay(alignment: .topTrailing) {
-                            if tab == .shelf && !model.shelf.isEmpty {
-                                Circle().fill(.white).frame(width: 5, height: 5).offset(x: -4, y: 3)
-                            }
-                        }
+                    Capsule()
+                        .fill(.white.opacity(selected ? 1 : lit ? 0.7 : waiting ? 0.55 : 0.25))
+                        .frame(width: selected ? 14 : 5, height: 2)
+                        .frame(width: 22, height: 14)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .help(tab.title)
+                .onHover { h in hovered = h ? tab : (hovered == tab ? nil : hovered) }
                 .accessibilityLabel(tab.title)
                 .accessibilityAddTraits(selected ? [.isSelected] : [])
             }
         }
+        .animation(.spring(duration: 0.3, bounce: 0.2), value: model.selectedTab)
+        .animation(.easeOut(duration: 0.12), value: hovered)
     }
 }
 
@@ -373,11 +406,10 @@ private struct EmptyTab: View {
 
     var body: some View {
         HStack(spacing: 14) {
-            RoundedRectangle(cornerRadius: 14, style: .continuous).fill(.white.opacity(0.08))
+            Image(systemName: symbol).font(.system(size: 22, weight: .light)).foregroundStyle(.white.opacity(0.3))
                 .frame(width: IslandModel.artworkSize, height: IslandModel.artworkSize)
-                .overlay(Image(systemName: symbol).font(.system(size: 28)).foregroundStyle(.secondary))
             VStack(alignment: .leading, spacing: 10) {
-                Text(text).font(.system(size: 13, weight: .semibold)).fixedSize(horizontal: false, vertical: true)
+                Text(text).font(.system(size: 13)).foregroundStyle(.white.opacity(0.75)).fixedSize(horizontal: false, vertical: true)
                 if let buttonTitle { PillButton(title: buttonTitle, action: action) }
             }
             Spacer(minLength: 0)
@@ -390,61 +422,65 @@ struct MediaPanel: View {
 
     var body: some View {
         if let np = model.nowPlaying {
-            HStack(spacing: 14) {
-                ArtworkView(image: model.artwork, size: IslandModel.artworkSize, corner: 14)
-                    .shadow(color: .black.opacity(0.5), radius: 8, y: 3)
+            HStack(spacing: 16) {
+                ArtworkView(image: model.artwork, size: IslandModel.artworkSize, corner: 10)
 
-                // Title pinned to the artwork's top, controls to its bottom, progress evenly between.
+                // Title with the artist small beneath, a hairline with the position, then the controls.
                 VStack(alignment: .leading, spacing: 0) {
-                    HStack(alignment: .top) {
+                    HStack(alignment: .top, spacing: 8) {
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(np.title).font(.system(size: 14, weight: .semibold)).lineLimit(1)
-                            Text(np.artist).font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(1)
+                            Text(np.title).font(.system(size: 14)).lineLimit(1)
+                            Text(np.artist).font(.system(size: 11)).foregroundStyle(.white.opacity(0.45)).lineLimit(1)
                         }
-                        Spacer(minLength: 6)
-                        EqualizerView(isPlaying: np.isPlaying, tint: .white).frame(width: 16, height: 12).padding(.top, 3)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        if let other = model.mediaSources.first(where: { $0 != np.source }) {
+                            SourceSwitchButton(target: other) { model.switchMediaSource() }
+                                .transition(.opacity)
+                        }
                     }
                     Spacer(minLength: 0)
                     ProgressRow(np: np)
                     Spacer(minLength: 0)
-                    HStack(spacing: 22) {
-                        IconButton(systemName: "backward.fill", size: 16) { model.perform(.previous) }
+                    HStack(spacing: 6) {
+                        MacMediaButton(systemName: "backward.fill", size: 15) { model.perform(.previous) }
                             .accessibilityLabel("Предыдущий трек")
-                        IconButton(systemName: np.isPlaying ? "pause.fill" : "play.fill", size: 22) { model.perform(.playPause) }
+                        MacMediaButton(systemName: np.isPlaying ? "pause.fill" : "play.fill", size: 21) { model.perform(.playPause) }
                             .accessibilityLabel(np.isPlaying ? "Пауза" : "Воспроизвести")
-                            .contentTransition(.symbolEffect(.replace))
-                        IconButton(systemName: "forward.fill", size: 16) { model.perform(.next) }
+                        MacMediaButton(systemName: "forward.fill", size: 15) { model.perform(.next) }
                             .accessibilityLabel("Следующий трек")
                     }
                     .frame(maxWidth: .infinity)
                     .overlay(alignment: .leading) {
-                        IconButton(systemName: "shuffle", size: 13) { model.toggleShuffle() }
-                            .foregroundStyle(np.isShuffling ? Color.white : Color.white.opacity(0.4))
-                            .overlay(alignment: .bottom) {
-                                if np.isShuffling {
-                                    Circle().fill(.white).frame(width: 3, height: 3).offset(y: 1)
-                                }
-                            }
-                            .help(np.isShuffling ? "Перемешивание включено" : "Перемешивание выключено")
-                            .accessibilityLabel(np.isShuffling ? "Перемешивание включено" : "Перемешивание выключено")
-                    }
-                    .overlay(alignment: .trailing) {
-                        HStack(spacing: 10) {
-                            SpeakerButton(model: model, size: 13)
-                            IconButton(systemName: "list.bullet", size: 13) { model.togglePlaylist() }
-                                .foregroundStyle(model.showPlaylist ? Color.white : Color.white.opacity(0.55))
-                                .help("Плейлист")
-                                .accessibilityLabel("Плейлист")
+                        if np.source == .youtube {
+                            // A video: no shuffle — just say where it plays.
+                            Image(systemName: "play.rectangle.fill")
+                                .font(.system(size: 11))
+                                .foregroundStyle(.white.opacity(0.45))
+                                .padding(.leading, 6)
+                                .help("Видео в браузере")
+                        } else {
+                            MacMediaButton(systemName: "shuffle", size: 11, isOn: np.isShuffling, secondary: true) { model.toggleShuffle() }
+                                .help(np.isShuffling ? "Перемешивание включено" : "Перемешивание выключено")
+                                .accessibilityLabel(np.isShuffling ? "Перемешивание включено" : "Перемешивание выключено")
                         }
                     }
-                    .padding(.bottom, -5) // optical: icon buttons carry 5pt of hit padding below the glyph
+                    .overlay(alignment: .trailing) {
+                        HStack(spacing: 2) {
+                            SpeakerButton(model: model, size: 11, macStyle: true)
+                            if np.source != .youtube {
+                                MacMediaButton(systemName: "list.bullet", size: 11, isOn: model.showPlaylist, secondary: true) { model.togglePlaylist() }
+                                    .help("Плейлист")
+                                    .accessibilityLabel("Плейлист")
+                            }
+                        }
+                    }
+                    .padding(.bottom, -4) // optical: buttons carry hit padding below the glyph
                 }
             }
         } else {
             HStack(spacing: 14) {
-                RoundedRectangle(cornerRadius: 14).fill(.white.opacity(0.08))
+                Image(systemName: "music.note").font(.system(size: 22, weight: .light)).foregroundStyle(.white.opacity(0.3))
                     .frame(width: IslandModel.artworkSize, height: IslandModel.artworkSize)
-                    .overlay(Image(systemName: "music.note").font(.system(size: 30)).foregroundStyle(.secondary))
                 VStack(alignment: .leading, spacing: 10) {
                     switch model.mediaProblem {
                     case .denied(let source)?:
@@ -460,7 +496,7 @@ struct MediaPanel: View {
                         Text("Остров попробует снова через минуту.")
                             .font(.system(size: 11)).foregroundStyle(.secondary)
                     case nil:
-                        Text("Ничего не играет").font(.system(size: 14, weight: .semibold))
+                        Text("Ничего не играет").font(.system(size: 14)).foregroundStyle(.white.opacity(0.75))
                         HStack(spacing: 8) {
                             PillButton(title: "Музыка") { open("com.apple.Music") }
                             PillButton(title: "Spotify") { open("com.spotify.client") }
@@ -486,19 +522,22 @@ struct ProgressRow: View {
         TimelineView(.animation(minimumInterval: 1 / 12, paused: !np.isPlaying)) { ctx in
             let pos = np.position(at: ctx.date)
             let fraction = np.duration > 0 ? pos / np.duration : 0
-            HStack(spacing: 8) {
+            HStack(spacing: 10) {
                 Text(format(pos))
                 GeometryReader { geo in
                     ZStack(alignment: .leading) {
-                        Capsule().fill(.white.opacity(0.15))
-                        Capsule().fill(.white).frame(width: geo.size.width * fraction)
+                        Capsule().fill(.white.opacity(0.2))
+                        Capsule().fill(.white.opacity(0.85))
+                            .frame(width: max(4, geo.size.width * fraction))
                     }
+                    .frame(height: 4)
+                    .frame(maxHeight: .infinity)
                 }
-                .frame(height: 4)
+                .frame(height: 6)
                 Text("-" + format(max(0, np.duration - pos)))
             }
             .font(.system(size: 10, weight: .medium).monospacedDigit())
-            .foregroundStyle(.secondary)
+            .foregroundStyle(.white.opacity(0.5))
             .accessibilityElement(children: .ignore)
             .accessibilityLabel("Позиция в треке")
             .accessibilityValue("\(format(pos)) из \(format(np.duration))")
@@ -525,7 +564,7 @@ struct DropZoneView: View {
         VStack(spacing: 0) {
             Color.clear.frame(height: model.notchSize.height)
             HStack(spacing: 12) {
-                DropTile(title: "Полка", hint: "Покорми кота файлом") { targeted in
+                DropTile(title: "Полка", hint: "Покорми пета файлом") { targeted in
                     // Mouth open while you carry the file; wide open when it's right above.
                     PetView(mood: targeted ? .gaping : .hungry, size: 26)
                 } onDrop: { model.addToShelf($0) }
@@ -556,15 +595,15 @@ private struct DropTile<Icon: View>: View {
     var body: some View {
         ZStack {
             RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .fill(.white.opacity(targeted ? 0.12 : 0.04))
+                .fill(.white.opacity(targeted ? 0.06 : 0))
             RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .strokeBorder(.white.opacity(targeted ? 0.85 : 0.28), style: StrokeStyle(lineWidth: 1.5, dash: [6, 5]))
+                .strokeBorder(.white.opacity(targeted ? 0.7 : 0.18), style: StrokeStyle(lineWidth: 0.75, dash: [4, 4]))
             HStack(spacing: 12) {
                 icon(targeted)
                     .frame(width: 42, height: 42)
                     .scaleEffect(targeted ? 1.12 : 1)
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(title).font(.system(size: 15, weight: .semibold))
+                    Text(title).font(.system(size: 15))
                     Text(targeted ? "Отпусти" : hint)
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
@@ -673,8 +712,8 @@ struct ShelfTab: View {
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 8) {
                     Text(Self.filesLabel(model.shelf.count))
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(.secondary)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.white.opacity(0.45))
                     Spacer()
                     IconButton(systemName: "paperplane", size: 10) { model.airDrop(urls: model.shelf) }
                         .foregroundStyle(.secondary)
@@ -737,6 +776,7 @@ struct ShelfItem: View {
                 }
             Text(url.lastPathComponent)
                 .font(.system(size: 10))
+                .foregroundStyle(.white.opacity(0.6))
                 .lineLimit(1)
                 .truncationMode(.middle)
                 .frame(width: 64)
@@ -769,12 +809,12 @@ struct ToolsTab: View {
     @ObservedObject var model: IslandModel
 
     var body: some View {
-        HStack(spacing: 12) {
-            ToolTile(symbol: "eyedropper.halffull", title: "Пипетка") { model.pickColor() }
+        HStack(spacing: 4) {
+            ToolTile(symbol: "eyedropper", title: "Пипетка") { model.pickColor() }
             PomodoroTile(pomodoro: model.pomodoro)
-            ToolTile(symbol: "house.fill", title: "Дом") { model.openHome() }
+            ToolTile(symbol: "house", title: "Дом") { model.openHome() }
                 .help("План квартиры и лампы Умного дома Яндекса")
-            ToolTile(symbol: "bubbles.and.sparkles", title: "Чистка") { model.startCleaning() }
+            ToolTile(symbol: "sparkles", title: "Чистка") { model.startCleaning() }
                 .help("Чёрный экран, клавиатура и трекпад отключены. Выход — удерживать Esc 2 с")
                 .contextMenu {
                     ForEach(CleaningMode.durations, id: \.self) { d in
@@ -792,7 +832,8 @@ struct ToolsTab: View {
 
             VStack(alignment: .leading, spacing: 6) {
                 HStack {
-                    Text("Цвета").font(.system(size: 12, weight: .medium)).foregroundStyle(.secondary)
+                    Text("цвета").font(.system(size: 11)).foregroundStyle(.white.opacity(0.45))
+                        .lineLimit(1).fixedSize()
                     Spacer()
                     if !model.colorHistory.isEmpty {
                         IconButton(systemName: "trash", size: 10) { model.clearColors() }
@@ -828,13 +869,13 @@ private struct ToolTile: View {
 
     var body: some View {
         Button(action: action) {
-            VStack(spacing: 8) {
-                Image(systemName: symbol).font(.system(size: 26, weight: .medium))
-                Text(title).font(.system(size: 11, weight: .medium))
+            VStack(spacing: 10) {
+                Image(systemName: symbol).font(.system(size: 20, weight: .light))
+                    .foregroundStyle(.white.opacity(hover ? 1 : 0.75))
+                Text(title).font(.system(size: 11)).foregroundStyle(.white.opacity(hover ? 0.9 : 0.45))
             }
             .frame(width: IslandModel.artworkSize, height: IslandModel.artworkSize)
-            .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(.white.opacity(hover ? 0.14 : 0.08)))
-            .scaleEffect(hover ? 1.03 : 1)
+            .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(.white.opacity(hover ? 0.05 : 0)))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -896,15 +937,14 @@ struct ColorPeekView: View {
         EarsLayout(notchWidth: model.notchSize.width, height: model.notchSize.height) {
             HStack(spacing: 7) {
                 Circle().fill(Color(hex: hex))
-                    .overlay(Circle().strokeBorder(.white.opacity(0.3), lineWidth: 1))
-                    .frame(width: 16, height: 16)
-                Text("Скопировано").font(.system(size: 12, weight: .medium))
+                    .frame(width: 9, height: 9)
+                Text("скопировано").font(.system(size: 12)).foregroundStyle(.white.opacity(0.75))
             }
             .padding(.leading, 14)
             .frame(maxWidth: .infinity, alignment: .leading)
         } right: {
             Text(hex)
-                .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                .font(.system(size: 12, design: .monospaced))
                 .padding(.trailing, 14)
                 .frame(maxWidth: .infinity, alignment: .trailing)
         }
@@ -950,21 +990,16 @@ struct DevicePeekView: View {
 
     var body: some View {
         EarsLayout(notchWidth: model.notchSize.width, height: model.notchSize.height) {
-            HStack(spacing: 7) {
-                Image(systemName: event.symbol)
-                    .font(.system(size: 15, weight: .medium))
-                    .foregroundStyle(event.connected ? .white : .secondary)
-                Text(event.name)
-                    .font(.system(size: 12, weight: .medium))
-                    .lineLimit(1)
-                    .foregroundStyle(event.connected ? .primary : .secondary)
-            }
+            Text(event.name)
+                .font(.system(size: 12))
+                .lineLimit(1)
+                .foregroundStyle(.white.opacity(event.connected ? 0.75 : 0.4))
             .padding(.leading, 14)
             .frame(maxWidth: .infinity, alignment: .leading)
         } right: {
             Group {
                 if !event.connected {
-                    Text("Отключено").foregroundStyle(.secondary)
+                    Text("отключено").foregroundStyle(.white.opacity(0.4))
                 } else if let battery = event.battery {
                     HStack(spacing: 5) {
                         Text("\(battery)%").foregroundStyle(battery <= 20 ? .red : .green)
@@ -974,12 +1009,10 @@ struct DevicePeekView: View {
                 } else if let detail = event.detail {
                     Text(detail).foregroundStyle(.secondary).lineLimit(1)
                 } else {
-                    Label("Подключено", systemImage: "checkmark.circle.fill")
-                        .labelStyle(.titleAndIcon)
-                        .foregroundStyle(.green)
+                    Text("подключено").foregroundStyle(.green)
                 }
             }
-            .font(.system(size: 12, weight: .semibold).monospacedDigit())
+            .font(.system(size: 12).monospacedDigit())
             .padding(.trailing, 14)
             .frame(maxWidth: .infinity, alignment: .trailing)
         }
@@ -1327,6 +1360,92 @@ struct IconButton: View {
     }
 }
 
+/// Media control in the style of macOS Control Center's Now Playing: filled glyphs, a soft rounded
+/// highlight on hover, dimming on press; toggles get a filled circle when on.
+/// "⇄ YouTube": shows the other player that has something loaded (Spotify and a video at once).
+struct SourceSwitchButton: View {
+    let target: MediaSource
+    let action: () -> Void
+    @State private var hover = false
+
+    private var title: String {
+        switch target {
+        case .spotify: return "Spotify"
+        case .music: return "Музыка"
+        case .youtube: return "Видео"
+        }
+    }
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 3) {
+                Image(systemName: "arrow.left.arrow.right").font(.system(size: 8, weight: .bold))
+                Text(title).font(.system(size: 10, weight: .medium))
+            }
+            .foregroundStyle(.white.opacity(hover ? 0.95 : 0.6))
+            .padding(.horizontal, 7)
+            .padding(.vertical, 3)
+            .background(Capsule().fill(.white.opacity(hover ? 0.18 : 0.1)))
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .onHover { hover = $0 }
+        .help("Показать \(title)")
+        .accessibilityLabel("Переключить на \(title)")
+    }
+}
+
+struct MacMediaButton: View {
+    let systemName: String
+    let size: CGFloat
+    var isOn = false
+    var secondary = false
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: systemName)
+                .font(.system(size: size, weight: secondary ? .semibold : .regular))
+                .frame(width: size + 16, height: size + 12)
+        }
+        .buttonStyle(MacMediaButtonStyle(isOn: isOn, secondary: secondary))
+    }
+}
+
+struct MacMediaButtonStyle: ButtonStyle {
+    var isOn = false
+    var secondary = false
+
+    func makeBody(configuration: Configuration) -> some View {
+        Face(configuration: configuration, isOn: isOn, secondary: secondary)
+    }
+
+    private struct Face: View {
+        let configuration: Configuration
+        let isOn: Bool
+        let secondary: Bool
+        @State private var hover = false
+
+        var body: some View {
+            configuration.label
+                .foregroundStyle(isOn ? Color.black.opacity(0.85) : Color.white.opacity(secondary ? 0.6 : 0.95))
+                .background {
+                    if isOn {
+                        Circle().fill(.white.opacity(0.9)).padding(3)
+                    } else {
+                        RoundedRectangle(cornerRadius: 7, style: .continuous)
+                            .fill(.white.opacity(configuration.isPressed ? 0.18 : hover ? 0.1 : 0))
+                    }
+                }
+                .opacity(configuration.isPressed ? 0.65 : 1)
+                .contentShape(Rectangle())
+                .onHover { hover = $0 }
+                .animation(.easeOut(duration: 0.12), value: hover)
+                .animation(.easeOut(duration: 0.08), value: configuration.isPressed)
+        }
+    }
+}
+
 struct PillButton: View {
     let title: String
     let action: () -> Void
@@ -1335,9 +1454,10 @@ struct PillButton: View {
     var body: some View {
         Button(action: action) {
             Text(title)
-                .font(.system(size: 11, weight: .semibold))
+                .font(.system(size: 11))
                 .padding(.horizontal, 12).padding(.vertical, 6)
-                .background(Capsule().fill(.white.opacity(hover ? 0.2 : 0.12)))
+                .background(Capsule().fill(.white.opacity(hover ? 0.08 : 0)))
+                .overlay(Capsule().strokeBorder(.white.opacity(0.25), lineWidth: 0.5))
         }
         .buttonStyle(.plain)
         .onHover { hover = $0 }
@@ -1349,6 +1469,7 @@ struct SpeakerButton: View {
     @ObservedObject var model: IslandModel
     @ObservedObject private var link = SpeakerLink.shared
     var size: CGFloat = 13
+    var macStyle = false
 
     var body: some View {
         if link.isAvailable {
@@ -1356,6 +1477,8 @@ struct SpeakerButton: View {
             Group {
                 if link.isBusy {
                     ProgressView().controlSize(.mini).frame(width: size + 6, height: size + 6)
+                } else if macStyle {
+                    MacMediaButton(systemName: "hifispeaker.fill", size: size, isOn: active, secondary: true) { model.toggleSpeaker() }
                 } else {
                     IconButton(systemName: active ? "hifispeaker.fill" : "hifispeaker", size: size) { model.toggleSpeaker() }
                         .foregroundStyle(active ? Color.white : Color.white.opacity(0.55))

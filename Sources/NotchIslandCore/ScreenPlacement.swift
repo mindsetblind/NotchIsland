@@ -10,10 +10,13 @@ public struct ScreenInfo: Equatable, Sendable {
     /// Widths of the menu bar areas left/right of the notch (auxiliaryTopLeft/RightArea).
     public var auxLeftWidth: CGFloat?
     public var auxRightWidth: CGFloat?
+    /// The MacBook's own panel (CGDisplayIsBuiltin), notch or not.
+    public var isBuiltIn: Bool
 
     public init(id: UInt32, frame: CGRect, visibleFrame: CGRect, safeTop: CGFloat = 0,
-                auxLeftWidth: CGFloat? = nil, auxRightWidth: CGFloat? = nil) {
+                auxLeftWidth: CGFloat? = nil, auxRightWidth: CGFloat? = nil, isBuiltIn: Bool = false) {
         self.id = id
+        self.isBuiltIn = isBuiltIn
         self.frame = frame
         self.visibleFrame = visibleFrame
         self.safeTop = safeTop
@@ -24,14 +27,45 @@ public struct ScreenInfo: Equatable, Sendable {
     public var hasNotch: Bool { safeTop > 0 && auxLeftWidth != nil && auxRightWidth != nil }
 }
 
+/// Which display the island lives on (Settings → Основные → Остров).
+public enum IslandScreenChoice: String, CaseIterable, Sendable {
+    /// An external monitor when one is connected (the primary one if it's external), else the MacBook.
+    case external
+    /// The primary display — the one with the menu bar in the Displays settings.
+    case primary
+    /// The built-in display with the notch (falls back to the primary one with the lid closed).
+    case notch
+    /// Whichever display the mouse pointer is on.
+    case mouse
+}
+
 public enum ScreenPlacement {
-    /// The display the island belongs on: the built-in display with a notch if there is one, otherwise
-    /// the primary display (the first in the list — the one with the menu bar in the Displays settings).
+    /// The display the island belongs on for `choice`. `screens` is in `NSScreen.screens` order, so the
+    /// first one is the primary display.
     ///
     /// Deliberately not `NSScreen.main`: that is the screen with the key window and changes whenever
     /// focus moves to another display, which used to make hit-testing disagree with where the panel was.
-    public static func pick(_ screens: [ScreenInfo]) -> ScreenInfo? {
-        screens.first(where: \.hasNotch) ?? screens.first
+    public static func pick(_ screens: [ScreenInfo], choice: IslandScreenChoice = .notch,
+                            mouse: CGPoint? = nil) -> ScreenInfo? {
+        guard let primary = screens.first else { return nil }
+        switch choice {
+        case .external:
+            if !primary.isBuiltIn { return primary }
+            return screens.first(where: { !$0.isBuiltIn }) ?? primary
+        case .primary:
+            return primary
+        case .notch:
+            return screens.first(where: \.hasNotch) ?? primary
+        case .mouse:
+            guard let mouse else { return primary }
+            return screens.first(where: { contains($0.frame, mouse) }) ?? primary
+        }
+    }
+
+    /// Like `CGRect.contains`, but the top edge counts too: the pointer pinned against the top of a
+    /// display reports y == frame.maxY.
+    public static func contains(_ frame: CGRect, _ p: CGPoint) -> Bool {
+        p.x >= frame.minX && p.x < frame.maxX && p.y >= frame.minY && p.y <= frame.maxY
     }
 
     /// Size of the physical notch, or of the pill drawn under the menu bar on displays without one.

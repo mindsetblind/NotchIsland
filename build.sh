@@ -12,6 +12,8 @@ ditto $BIN/Sparkle.framework $APP/Contents/Frameworks/Sparkle.framework
 rm -rf $APP/Contents/Frameworks/Sparkle.framework/Versions/B/XPCServices $APP/Contents/Frameworks/Sparkle.framework/XPCServices
 cp Info.plist $APP/Contents/
 cp Icon/AppIcon.icns $APP/Contents/Resources/
+# Reads the system Now Playing (YouTube in a browser); loaded into /usr/bin/perl at runtime.
+clang -dynamiclib -fobjc-arc -O2 -framework Foundation -o $APP/Contents/Resources/NowPlayingBridge.dylib Helper/NowPlayingBridge.m
 # Optional picture/looping video shown while artwork loads (not in git — put your own files there).
 # A picture wins over a video.
 for f in Resources/placeholder.jpg Resources/placeholder.png Resources/placeholder.mp4; do

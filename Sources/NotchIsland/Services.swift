@@ -2,22 +2,28 @@ import AppKit
 import IOKit.ps
 import NotchIslandCore
 
-// MARK: - Now playing (Spotify / Apple Music via AppleScript)
+// MARK: - Now playing (Spotify / Apple Music via AppleScript, YouTube in a browser via Now Playing)
 
 enum MediaSource: String, CaseIterable {
     case spotify = "Spotify"
     case music = "Music"
+    /// A video in a browser tab (see BrowserMedia). No AppleScript, no playlist, no shuffle.
+    case youtube = "YouTube"
 
     var bundleID: String {
         switch self {
         case .spotify: return "com.spotify.client"
         case .music: return "com.apple.Music"
+        case .youtube: return ""
         }
     }
 
     var isRunning: Bool {
-        !NSRunningApplication.runningApplications(withBundleIdentifier: bundleID).isEmpty
+        !bundleID.isEmpty && !NSRunningApplication.runningApplications(withBundleIdentifier: bundleID).isEmpty
     }
+
+    /// Players driven through AppleScript (and asked for Automation access).
+    var usesAppleScript: Bool { self != .youtube }
 }
 
 enum MediaCommand { case playPause, next, previous }
@@ -56,6 +62,9 @@ final class MediaService: @unchecked Sendable {
     private var compiled: [String: NSAppleScript] = [:]
     private let queue = DispatchQueue(label: "notchisland.applescript", qos: .userInitiated)
     private let queueKey = DispatchSpecificKey<Bool>()
+
+    /// YouTube & co. playing in a browser.
+    let browser = BrowserMedia()
 
     init() { queue.setSpecific(key: queueKey, value: true) }
 
@@ -117,6 +126,8 @@ final class MediaService: @unchecked Sendable {
     /// Result of one poll: what's playing, and how each player answered.
     struct Poll {
         var nowPlaying: NowPlaying?
+        /// Everything that has something loaded (playing or paused), one per player.
+        var candidates: [NowPlaying] = []
         var access: [MediaSource: PlayerAccess] = [:]
     }
 
@@ -141,6 +152,9 @@ final class MediaService: @unchecked Sendable {
             poll.access[source] = access
             if let np { candidates.append(np) }
         }
+        // After the players: a paused Spotify still wins over a paused video, a playing video over both.
+        if let video = browser.nowPlaying { candidates.append(video) }
+        poll.candidates = candidates
         poll.nowPlaying = candidates.first(where: \.isPlaying) ?? candidates.first
         return poll
     }
@@ -176,6 +190,7 @@ final class MediaService: @unchecked Sendable {
     }
 
     func send(_ command: MediaCommand, to source: MediaSource) {
+        guard source.usesAppleScript else { return browser.send(command) }
         let verb: String
         switch command {
         case .playPause: verb = "playpause"
@@ -183,6 +198,12 @@ final class MediaService: @unchecked Sendable {
         case .previous: verb = "previous track"
         }
         runAsync("tell application \"\(source.rawValue)\" to \(verb)")
+    }
+
+    /// Pauses a player (not a toggle): used to stop the other one when you start something.
+    func pause(_ source: MediaSource) {
+        guard source.usesAppleScript else { return browser.pause() }
+        runAsync("tell application \"\(source.rawValue)\" to pause")
     }
 
     /// Fast, direct read of Spotify's current track (used while skipping through the queue).
@@ -254,11 +275,13 @@ final class MediaService: @unchecked Sendable {
     }
 
     func setShuffle(_ on: Bool, for source: MediaSource) {
+        guard source.usesAppleScript else { return }
         let property = source == .spotify ? "shuffling" : "shuffle enabled"
         runAsync("tell application \"\(source.rawValue)\" to set \(property) to \(on)")
     }
 
     func seekToStart(_ source: MediaSource) {
+        guard source.usesAppleScript else { return }
         runAsync("tell application \"\(source.rawValue)\" to set player position to 0")
     }
 
@@ -274,6 +297,10 @@ final class MediaService: @unchecked Sendable {
 
     func loadArtwork(for np: NowPlaying, completion: @escaping @Sendable (NSImage?) -> Void) {
         switch np.source {
+        case .youtube:
+            // The bridge already delivered the picture with the track info.
+            let image = browser.artwork(for: np.artworkURL)
+            DispatchQueue.main.async { completion(image) }
         case .spotify:
             guard let s = np.artworkURL, let url = URL(string: s), url.scheme == "https" else { return completion(nil) }
             Self.artworkSession.dataTask(with: url) { data, response, error in

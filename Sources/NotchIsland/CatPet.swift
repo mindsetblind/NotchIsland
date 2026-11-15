@@ -703,6 +703,8 @@ enum CatMotion {
 
     static func specs(for mood: PetMood) -> [Spec] {
         switch mood {
+        case .listening, .thinking, .presenting, .failed:
+            return specs(for: mood.catFallback)
         case .idle:
             let ear = K(duration: 3.2, timing: .steps(4), groups: [([0, 0.65, 1], ["rot": 0]), ([0.72], ["rot": -14]), ([0.79], ["rot": 5])])
             return [
