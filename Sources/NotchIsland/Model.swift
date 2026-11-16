@@ -448,12 +448,19 @@ final class IslandModel: ObservableObject {
     private func startEventServer() {
         eventServer = HookSocketServer { [weak self] data, event, fd in
             let isDev = DevEventParser.isDevEvent(event)
+            let isPolygon = PolygonEventParser.isPolygonEvent(event)
             // JSON objects aren't Sendable; they are only read on the main actor from here on.
             nonisolated(unsafe) let event = event
             DispatchQueue.main.async {
                 MainActor.assumeIsolated {
                     guard let self else { Darwin.close(fd); return }
-                    if isDev { self.developer.receive(data, connection: fd) } else { self.claude.handleHookEvent(event, connection: fd) }
+                    if isDev {
+                        self.developer.receive(data, connection: fd)
+                    } else if isPolygon {
+                        self.receivePolygon(event, connection: fd)
+                    } else {
+                        self.claude.handleHookEvent(event, connection: fd)
+                    }
                 }
             }
         }
