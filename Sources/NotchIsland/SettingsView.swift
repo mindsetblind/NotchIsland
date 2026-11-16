@@ -183,6 +183,7 @@ struct AlertToggle {
         AlertToggle(kind: .color, title: "Пипетка: цвет скопирован"),
         AlertToggle(kind: .clipboard, title: "Буфер: скопировано из истории"),
         AlertToggle(kind: .portal, title: "Portal: файл прилетел с iPhone"),
+        AlertToggle(kind: .polygon, title: "Polygon: задача сделана, скоро событие"),
     ]
 }
 

@@ -11,6 +11,8 @@ public enum ActivityKind: String, CaseIterable, Codable, Sendable {
     case pet
     /// A file flew in from an iPhone (Portal).
     case portal
+    /// Polygon (the planner): a task got done, an event from its schedule starts soon.
+    case polygon
 
     /// Default order, highest first. Live activities can be re-ordered by the user (Settings).
     public var defaultPriority: Int {
@@ -21,6 +23,7 @@ public enum ActivityKind: String, CaseIterable, Codable, Sendable {
         case .pomodoro: return 70
         case .battery: return 60
         case .portal: return 55
+        case .polygon: return 52
         case .device: return 50
         case .disk: return 45
         case .download: return 40
