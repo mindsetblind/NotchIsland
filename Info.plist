@@ -15,9 +15,9 @@
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>1.5</string>
+	<string>1.6</string>
 	<key>CFBundleVersion</key>
-	<string>6</string>
+	<string>7</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>14.0</string>
 	<key>LSUIElement</key>
@@ -31,15 +31,15 @@
 	<string>NotchIsland показывает текущий трек и управляет воспроизведением в Музыке и Spotify, а pet узнаёт, какая папка открыта в Finder.</string>
 	<key>NSBluetoothAlwaysUsageDescription</key>
 	<string>NotchIsland показывает, когда подключаются AirPods и другие Bluetooth-устройства.</string>
-	<key>NSCalendarsFullAccessUsageDescription</key>
-	<string>NotchIsland напоминает о ближайших событиях у выреза. События читаются только на этом Mac.</string>
-	<key>NSCalendarsUsageDescription</key>
-	<string>NotchIsland напоминает о ближайших событиях у выреза. События читаются только на этом Mac.</string>
 	<key>NSBonjourServices</key>
 	<array>
 		<string>_notch-portal._tcp</string>
 		<string>_notch-portal._udp</string>
 	</array>
+	<key>NSCalendarsFullAccessUsageDescription</key>
+	<string>NotchIsland напоминает о ближайших событиях у выреза. События читаются только на этом Mac.</string>
+	<key>NSCalendarsUsageDescription</key>
+	<string>NotchIsland напоминает о ближайших событиях у выреза. События читаются только на этом Mac.</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>NotchIsland принимает фото и файлы с твоего iPhone (Portal) по локальной сети. Ничего не уходит в интернет.</string>
 	<key>NSMicrophoneUsageDescription</key>
