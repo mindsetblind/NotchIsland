@@ -1,5 +1,5 @@
 // Reads the system "Now Playing" (what a browser tab with YouTube is playing) and sends
-// play/pause/next/previous to it.
+// play/pause/next/previous and seeks to it.
 //
 // Since macOS 15.4 MediaRemote answers only Apple-signed processes, so NotchIsland can't ask
 // directly. This library is loaded into /usr/bin/perl (Apple-signed) by BrowserMedia.swift:
@@ -147,12 +147,19 @@ void np_send(void *perl, void *cv) {
     const char *cmd = getenv("NP_COMMAND");
     const char *app = getenv("NP_APP");
     if (!cmd) exit(2);
+    // NP_POSITION (seconds) goes with command 24, SeekToPlaybackPosition.
+    NSDictionary *options = nil;
+    const char *pos = getenv("NP_POSITION");
+    if (pos) {
+        NSString *const *key = (NSString *const *)mr("kMRMediaRemoteOptionPlaybackPosition");
+        options = @{ key ? *key : @"kMRMediaRemoteOptionPlaybackPosition": @(atof(pos)) };
+    }
     // To one app by bundle ID: pausing the video must not pause Spotify, whichever the system shows.
     MRSendToApp sendToApp = (MRSendToApp)mr("MRMediaRemoteSendCommandToApp");
     Class origin = NSClassFromString(@"MROrigin");
     if (app && sendToApp && origin) {
         dispatch_semaphore_t done = dispatch_semaphore_create(0);
-        sendToApp(atoi(cmd), nil, [origin localOrigin], [NSString stringWithUTF8String:app], 0,
+        sendToApp(atoi(cmd), options, [origin localOrigin], [NSString stringWithUTF8String:app], 0,
                   dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^(id error, id statuses) {
             (void)error; (void)statuses;
             dispatch_semaphore_signal(done);
@@ -161,7 +168,7 @@ void np_send(void *perl, void *cv) {
     }
     MRSend send = (MRSend)mr("MRMediaRemoteSendCommand");
     if (!send) exit(2);
-    Boolean ok = send(atoi(cmd), nil);
+    Boolean ok = send(atoi(cmd), options);
     // The command goes out asynchronously: give it a moment before the process ends.
     usleep(150 * 1000);
     exit(ok ? 0 : 1);

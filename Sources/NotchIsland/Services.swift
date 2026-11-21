@@ -280,6 +280,13 @@ final class MediaService: @unchecked Sendable {
         runAsync("tell application \"\(source.rawValue)\" to set \(property) to \(on)")
     }
 
+    /// Jumps to `seconds` in the current track.
+    func seek(_ source: MediaSource, to seconds: Double) {
+        guard source.usesAppleScript else { return browser.seek(to: seconds) }
+        let value = String(format: "%.2f", locale: Locale(identifier: "en_US_POSIX"), max(0, seconds))
+        runAsync("tell application \"\(source.rawValue)\" to set player position to \(value)")
+    }
+
     func seekToStart(_ source: MediaSource) {
         guard source.usesAppleScript else { return }
         runAsync("tell application \"\(source.rawValue)\" to set player position to 0")

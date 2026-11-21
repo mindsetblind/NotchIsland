@@ -439,7 +439,7 @@ struct MediaPanel: View {
                         }
                     }
                     Spacer(minLength: 0)
-                    ProgressRow(np: np)
+                    ProgressRow(np: np) { model.seek(to: $0) }
                     Spacer(minLength: 0)
                     HStack(spacing: 6) {
                         MacMediaButton(systemName: "backward.fill", size: 15) { model.perform(.previous) }
@@ -516,31 +516,58 @@ struct MediaPanel: View {
 
 struct ProgressRow: View {
     let np: NowPlaying
+    var onSeek: (Double) -> Void = { _ in }
+
+    /// 0…1 while the bar is being dragged; the bar follows the finger, the player jumps on release.
+    @State private var dragFraction: Double?
+    @State private var hovering = false
 
     var body: some View {
         // ~12 updates/s is smooth for a bar that moves a couple of points per second, at a third of the cost.
-        TimelineView(.animation(minimumInterval: 1 / 12, paused: !np.isPlaying)) { ctx in
-            let pos = np.position(at: ctx.date)
-            let fraction = np.duration > 0 ? pos / np.duration : 0
+        TimelineView(.animation(minimumInterval: 1 / 12, paused: !np.isPlaying || dragFraction != nil)) { ctx in
+            let live = np.position(at: ctx.date)
+            let pos = dragFraction.map { $0 * np.duration } ?? live
+            let fraction = np.duration > 0 ? min(1, max(0, pos / np.duration)) : 0
+            let active = hovering || dragFraction != nil
             HStack(spacing: 10) {
                 Text(format(pos))
                 GeometryReader { geo in
                     ZStack(alignment: .leading) {
                         Capsule().fill(.white.opacity(0.2))
-                        Capsule().fill(.white.opacity(0.85))
+                        Capsule().fill(.white.opacity(active ? 1 : 0.85))
                             .frame(width: max(4, geo.size.width * fraction))
                     }
-                    .frame(height: 4)
+                    .frame(height: active ? 6 : 4)
                     .frame(maxHeight: .infinity)
+                    .contentShape(Rectangle())
+                    .highPriorityGesture(
+                        DragGesture(minimumDistance: 0)
+                            .onChanged { v in
+                                guard np.duration > 0, geo.size.width > 0 else { return }
+                                dragFraction = min(1, max(0, v.location.x / geo.size.width))
+                            }
+                            .onEnded { v in
+                                guard np.duration > 0, geo.size.width > 0 else { dragFraction = nil; return }
+                                let f = min(1, max(0, v.location.x / geo.size.width))
+                                onSeek(f * np.duration)
+                                dragFraction = nil
+                            }
+                    )
+                    .onHover { hovering = $0 }
                 }
-                .frame(height: 6)
+                .frame(height: 12)
+                .animation(.easeOut(duration: 0.12), value: active)
                 Text("-" + format(max(0, np.duration - pos)))
             }
             .font(.system(size: 10, weight: .medium).monospacedDigit())
-            .foregroundStyle(.white.opacity(0.5))
+            .foregroundStyle(.white.opacity(active ? 0.75 : 0.5))
             .accessibilityElement(children: .ignore)
             .accessibilityLabel("Позиция в треке")
             .accessibilityValue("\(format(pos)) из \(format(np.duration))")
+            .accessibilityAdjustableAction { direction in
+                let step = 10.0
+                onSeek(live + (direction == .increment ? step : -step))
+            }
         }
     }
 

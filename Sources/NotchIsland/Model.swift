@@ -116,6 +116,9 @@ final class IslandModel: ObservableObject {
     private var mediaFetchInFlight = false
     private var lastCommandAt = Date.distantPast
     private var expectedPlaying: (value: Bool, until: Date)?
+    /// After a seek the player may still report the old position for a moment; within this window
+    /// a position far from where we jumped is treated as stale.
+    private var expectedPosition: (value: Double, until: Date)?
     /// Everything loaded in a player right now (Spotify, Music, a video), one per player.
     private var mediaCandidates: [NowPlaying] = []
     /// Players the island can switch between (the ⇄ button shows when there are two or more).
@@ -763,6 +766,18 @@ final class IslandModel: ObservableObject {
                 expectedPlaying = nil                       // the command really didn't take
             }
         }
+        if let expected = expectedPosition, var p = np, p.trackKey == nowPlaying?.trackKey {
+            let target = expected.value + (p.isPlaying ? Date().timeIntervalSince(expected.until.addingTimeInterval(-1.5)) : 0)
+            if abs(p.position(at: Date()) - target) < 2 {
+                expectedPosition = nil                      // the player got there
+            } else if Date() < expected.until {
+                p.position = nowPlaying?.position(at: Date()) ?? p.position
+                p.fetchedAt = Date()
+                np = p
+            } else {
+                expectedPosition = nil
+            }
+        }
         if np != nowPlaying {
             withAnimation(Self.spring) {
                 nowPlaying = np
@@ -823,6 +838,20 @@ final class IslandModel: ObservableObject {
         }
         // Ask again shortly so the UI reflects the new state without waiting a full second.
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in self?.refreshMedia() }
+    }
+
+    /// Jumps to `seconds` in the playing track (the progress bar was dragged or clicked).
+    func seek(to seconds: Double) {
+        guard var np = nowPlaying, np.duration > 0 else { return }
+        Usage.track(.musicControl)
+        let t = min(max(0, seconds), np.duration)
+        lastCommandAt = Date()
+        media.seek(np.source, to: t)
+        np.position = t
+        np.fetchedAt = Date()
+        expectedPosition = (t, Date().addingTimeInterval(1.5))
+        nowPlaying = np
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in self?.refreshMedia() }
     }
 
     // MARK: - Spotify playlist

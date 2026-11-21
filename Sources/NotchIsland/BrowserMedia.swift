@@ -209,7 +209,19 @@ final class BrowserMedia: @unchecked Sendable {
         if playing { send(code: 1) }
     }
 
-    private func send(code: Int) {
+    /// Jumps to `seconds` in the video (MediaRemote command 24, SeekToPlaybackPosition).
+    func seek(to seconds: Double) {
+        lock.lock()
+        if var s = state {
+            s.elapsed = seconds
+            s.receivedAt = Date()
+            state = s
+        }
+        lock.unlock()
+        send(code: 24, position: seconds)
+    }
+
+    private func send(code: Int, position: Double? = nil) {
         guard let bridge = Self.bridgePath else { return }
         lock.lock(); let app = state?.bundleID; lock.unlock()
         let p = Process()
@@ -217,6 +229,7 @@ final class BrowserMedia: @unchecked Sendable {
         p.arguments = ["-e", Self.loader, bridge, "np_send"]
         var env = ["NP_COMMAND": String(code)]
         if let app { env["NP_APP"] = app }   // to that browser only, never to Spotify
+        if let position { env["NP_POSITION"] = String(format: "%.3f", locale: Locale(identifier: "en_US_POSIX"), position) }
         p.environment = env
         p.standardOutput = FileHandle.nullDevice
         p.standardError = FileHandle.nullDevice
