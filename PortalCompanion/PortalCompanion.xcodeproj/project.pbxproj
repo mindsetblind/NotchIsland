@@ -9,6 +9,7 @@
 /* Begin PBXBuildFile section */
 		0C711A7C48D8218082E303CA /* PortalLink.swift in Sources */ = {isa = PBXBuildFile; fileRef = D31636071D029544ED004F90 /* PortalLink.swift */; };
 		595D5A3E1C6F699DDB2D0625 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D32F28D4167556A6725E46A1 /* ContentView.swift */; };
+		645D63E7F3D67D458E60A8AD /* PortalPairing.swift in Sources */ = {isa = PBXBuildFile; fileRef = F65F68E020889787BDD5E9BC /* PortalPairing.swift */; };
 		6DEB55CDEE36EDE014705FC5 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 99A7B572DCB2512B0DCC43D1 /* Assets.xcassets */; };
 		91655A11439F6FEF7B858FFF /* PortalItems.swift in Sources */ = {isa = PBXBuildFile; fileRef = FFB6783D2DD2310EFAA82980 /* PortalItems.swift */; };
 /* End PBXBuildFile section */
@@ -19,6 +20,7 @@
 		BC6FC1082C4A5B99A017A530 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		D31636071D029544ED004F90 /* PortalLink.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PortalLink.swift; sourceTree = "<group>"; };
 		D32F28D4167556A6725E46A1 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		F65F68E020889787BDD5E9BC /* PortalPairing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PortalPairing.swift; sourceTree = "<group>"; };
 		FFB6783D2DD2310EFAA82980 /* PortalItems.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PortalItems.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -26,9 +28,19 @@
 		72D83C89CA0A30F892650F95 = {
 			isa = PBXGroup;
 			children = (
+				7697BAC2E282B62393AC8D4A /* NotchIslandCore */,
 				B74F005C8CF35DB0228CC200 /* PortalCompanion */,
 				CF976BA01A69EB01DE3E19FC /* Products */,
 			);
+			sourceTree = "<group>";
+		};
+		7697BAC2E282B62393AC8D4A /* NotchIslandCore */ = {
+			isa = PBXGroup;
+			children = (
+				F65F68E020889787BDD5E9BC /* PortalPairing.swift */,
+			);
+			name = NotchIslandCore;
+			path = ../Sources/NotchIslandCore;
 			sourceTree = "<group>";
 		};
 		B74F005C8CF35DB0228CC200 /* PortalCompanion */ = {
@@ -125,6 +137,7 @@
 				595D5A3E1C6F699DDB2D0625 /* ContentView.swift in Sources */,
 				91655A11439F6FEF7B858FFF /* PortalItems.swift in Sources */,
 				0C711A7C48D8218082E303CA /* PortalLink.swift in Sources */,
+				645D63E7F3D67D458E60A8AD /* PortalPairing.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

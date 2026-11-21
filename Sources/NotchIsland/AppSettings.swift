@@ -150,7 +150,7 @@ final class AppSettings: ObservableObject {
         calendarEnabled = bool("calendarEnabled", false)
         calendarLeadMinutes = d.object(forKey: "calendarLeadMinutes") as? Int ?? 5
         portalEnabled = bool("portalEnabled", false)
-        portalEffect = d.string(forKey: "portalEffect") ?? "vortex"
+        portalEffect = d.string(forKey: "portalEffect") ?? "pet"
         portalFolder = d.string(forKey: "portalFolder") ?? ""
         portalHTTPEnabled = bool("portalHTTPEnabled", false)
         portalHTTPPort = d.object(forKey: "portalHTTPPort") as? Int ?? 54321

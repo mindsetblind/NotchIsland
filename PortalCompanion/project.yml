@@ -16,7 +16,8 @@ targets:
   PortalCompanion:
     type: application
     platform: iOS
-    sources: [PortalCompanion]
+    # PortalPairing.swift is shared with the Mac app (handshake messages, crypto, Keychain).
+    sources: [PortalCompanion, ../Sources/NotchIslandCore/PortalPairing.swift]
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: local.notchisland.portalcompanion

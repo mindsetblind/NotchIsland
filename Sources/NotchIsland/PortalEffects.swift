@@ -4,6 +4,8 @@ import SwiftUI
 
 /// What plays at the right edge of the screen while a file flies in.
 enum PortalEffect: String, CaseIterable, Identifiable {
+    /// The pet's icosahedron as a gate: faces light up with progress, shards fly in, it bursts on arrival.
+    case pet
     /// Bands of light bulging out of the edge, colours flowing through them.
     case rainbow
     /// A half-open ring with sparks spiralling into it.
@@ -14,13 +16,14 @@ enum PortalEffect: String, CaseIterable, Identifiable {
     var id: String { rawValue }
     var title: String {
         switch self {
+        case .pet: return "Пет"
         case .rainbow: return "Радуга"
         case .vortex: return "Портал"
         case .ripple: return "Волны"
         }
     }
 
-    static var current: PortalEffect { PortalEffect(rawValue: AppSettings.shared.portalEffect) ?? .vortex }
+    static var current: PortalEffect { PortalEffect(rawValue: AppSettings.shared.portalEffect) ?? .pet }
 }
 
 @MainActor
@@ -29,7 +32,7 @@ final class PortalEffectState: ObservableObject {
 
     @Published var phase = Phase.hidden
     @Published var progress: Double = 0
-    @Published var effect = PortalEffect.vortex
+    @Published var effect = PortalEffect.pet
     @Published var thumbnail: NSImage?
     var startedAt = Date()
     var phaseAt = Date()
@@ -178,7 +181,7 @@ struct PortalEffectView: View {
                 let frame = PortalFrame(state: state, now: ctx.date)
                 ZStack {
                     Canvas { gc, size in frame.draw(in: &gc, size: size) }
-                        .colorMultiply(state.phase == .failed ? Color(red: 1, green: 0.45, blue: 0.45) : .white)
+                        .colorMultiply(state.phase == .failed && state.effect != .pet ? Color(red: 1, green: 0.45, blue: 0.45) : .white)
                     GeometryReader { geo in
                         if let image = state.thumbnail { frame.arrivalCard(image, size: geo.size) }
                     }
@@ -198,6 +201,8 @@ struct PortalFrame {
     /// Bump on arrival (1 = none).
     let boost: Double
     let sinceArrival: Double?
+    /// Seconds since the transfer failed.
+    var sinceFailure: Double? = nil
     let calm: Bool
 
     @MainActor init(state: PortalEffectState, now: Date) {
@@ -215,6 +220,7 @@ struct PortalFrame {
             boost = calm ? 1 : 1 + 0.45 * sin(min(since / 0.6, 1) * .pi)
         case .failed:
             sinceArrival = nil
+            sinceFailure = since
             intensity = appear * (1 - smoothstep(0, 0.8, since))
             boost = 1
         default:
@@ -228,9 +234,133 @@ struct PortalFrame {
         guard intensity > 0.001 else { return }
         gc.blendMode = .plusLighter
         switch effect {
+        case .pet: petGate(&gc, size)
         case .rainbow: rainbow(&gc, size)
         case .vortex: vortex(&gc, size)
         case .ripple: ripple(&gc, size)
+        }
+    }
+
+    // MARK: Pet gate
+
+    /// Same palette as the pet (IcosaPet): ice blue at rest, cyan while working, mint on arrival, red glitch on failure.
+    private static let ice = (0.56, 0.83, 1.0)
+    private static let cyan = (0.18, 0.90, 1.0)
+    private static let mint = (0.30, 1.0, 0.65)
+    private static let alarm = (1.0, 0.25, 0.35)
+
+    private static let icosa: (v: [SIMD3<Double>], f: [(Int, Int, Int)]) = {
+        let g = (1 + 5.0.squareRoot()) / 2
+        let raw: [SIMD3<Double>] = [
+            [-1, g, 0], [1, g, 0], [-1, -g, 0], [1, -g, 0], [0, -1, g], [0, 1, g],
+            [0, -1, -g], [0, 1, -g], [g, 0, -1], [g, 0, 1], [-g, 0, -1], [-g, 0, 1]]
+        let n = (1 + g * g).squareRoot()
+        let faces = [(0, 11, 5), (0, 5, 1), (0, 1, 7), (0, 7, 10), (0, 10, 11), (1, 5, 9), (5, 11, 4), (11, 10, 2),
+                     (10, 7, 6), (7, 1, 8), (3, 9, 4), (3, 4, 2), (3, 2, 6), (3, 6, 8), (3, 8, 9), (4, 9, 5),
+                     (2, 4, 11), (6, 2, 10), (8, 6, 7), (9, 8, 1)]
+        return (raw.map { $0 / n }, faces)
+    }()
+
+    private func petGate(_ gc: inout GraphicsContext, _ size: CGSize) {
+        let w = size.width, cy = size.height / 2
+        let failed = sinceFailure != nil
+        let arrive = sinceArrival.map { smoothstep(0, 0.7, $0) } ?? 0
+        // Colour: ice → cyan as data flows → mint flash on arrival → red when it fails.
+        func mix(_ a: (Double, Double, Double), _ b: (Double, Double, Double), _ k: Double) -> (Double, Double, Double) {
+            (a.0 + (b.0 - a.0) * k, a.1 + (b.1 - a.1) * k, a.2 + (b.2 - a.2) * k)
+        }
+        var rgb = mix(Self.ice, Self.cyan, smoothstep(0.02, 0.3, progress))
+        if let s = sinceArrival { rgb = mix(rgb, Self.mint, 1 - smoothstep(0.5, 1.4, s)) }
+        if failed { rgb = Self.alarm }
+        func col(_ a: Double) -> Color { Color(red: rgb.0, green: rgb.1, blue: rgb.2).opacity(max(0, min(1, a)) * intensity) }
+
+        // Glitch on failure: the whole gate jumps sideways in quantised steps.
+        var jx: CGFloat = 0
+        if let f = sinceFailure, !calm {
+            let q = floor(f / 0.05)
+            jx = CGFloat(fract(sin(q * 91.7) * 4375.5) - 0.5) * 16 * CGFloat(1 - smoothstep(0.2, 0.7, f))
+        }
+        let r = 150 * smoothstep(0, 0.55, t) * (1 + 0.025 * sin(t * 2.2)) * boost * (failed ? 0.92 : 1)
+        let center = CGPoint(x: w - 8 + jx, y: cy)
+        let spin = t * (0.35 + 0.5 * progress)
+        let (cA, sA) = (cos(spin), sin(spin)), (cB, sB) = (cos(0.5 + t * 0.21), sin(0.5 + t * 0.21))
+        func rot(_ p: SIMD3<Double>) -> SIMD3<Double> {
+            let x = p.x * cA + p.z * sA, z = -p.x * sA + p.z * cA
+            return SIMD3(x, p.y * cB - z * sB, p.y * sB + z * cB)
+        }
+        func proj(_ p: SIMD3<Double>) -> CGPoint {
+            let k = 3.2 / (3.2 - p.z)
+            return CGPoint(x: center.x + CGFloat(p.x * k) * r, y: center.y - CGFloat(p.y * k) * r)
+        }
+
+        // Soft core.
+        let core = r * 0.55
+        gc.fill(Path(ellipseIn: CGRect(x: center.x - core, y: center.y - core, width: 2 * core, height: 2 * core)),
+                with: .radialGradient(Gradient(colors: [col(0.28 + 0.25 * progress), .clear]),
+                                      center: center, startRadius: 0, endRadius: core))
+
+        // Faces: burst outward on arrival; light up one by one with progress.
+        let verts = Self.icosa.v.map(rot)
+        let lit = (sinceArrival != nil ? 20 : progress * 20)
+        struct Tri { var p: [CGPoint]; var z: Double; var front: Bool; var glow: Double }
+        var tris: [Tri] = []
+        for (i, f) in Self.icosa.f.enumerated() {
+            var a = verts[f.0], b = verts[f.1], c = verts[f.2]
+            let n = (a + b + c) / 3
+            let len = (n.x * n.x + n.y * n.y + n.z * n.z).squareRoot()
+            if arrive > 0 {
+                // Each face flies off along its normal and shrinks to a shard.
+                let push = n / len * (0.55 + 0.15 * Double(i % 3)) * arrive
+                let keep = 1 - 0.75 * arrive
+                a = n + push + (a - n) * keep; b = n + push + (b - n) * keep; c = n + push + (c - n) * keep
+            }
+            let glow = min(max(lit - Double(i), 0), 1)
+            tris.append(Tri(p: [proj(a), proj(b), proj(c)], z: n.z, front: n.z > -0.05, glow: glow))
+        }
+        let fadeOut = 1 - arrive
+        let ordered = tris.sorted(by: { $0.z < $1.z }).map { tri -> (Path, Tri, Double) in
+            var path = Path(); path.addLines(tri.p); path.closeSubpath()
+            return (path, tri, (tri.front ? 0.85 : 0.22) * (0.35 + 0.65 * (tri.z + 1) / 2) * fadeOut)
+        }
+        gc.drawLayer { layer in
+            layer.addFilter(.blur(radius: 5))
+            for (path, _, a) in ordered {
+                layer.stroke(path, with: .color(col(a * 0.6)), style: StrokeStyle(lineWidth: 5, lineJoin: .round))
+            }
+        }
+        for (path, tri, a) in ordered {
+            if tri.glow > 0 {
+                gc.fill(path, with: .color(col((0.10 + 0.22 * tri.glow) * (0.35 + 0.65 * (tri.z + 1) / 2) * fadeOut)))
+            }
+            gc.stroke(path, with: .color(col(a)), style: StrokeStyle(lineWidth: tri.front ? 1.3 : 0.8, lineJoin: .round))
+        }
+        if arrive < 1 {
+            for v in verts where v.z > -0.2 {
+                let p = proj(v), d = 1.6 + 1.2 * (v.z + 1) / 2
+                gc.fill(Path(ellipseIn: CGRect(x: p.x - d, y: p.y - d, width: 2 * d, height: 2 * d)),
+                        with: .color(Color.white.opacity(0.85 * (1 - arrive) * intensity)))
+            }
+        }
+
+        // Shards: small triangles drifting in from the screen toward the gate while receiving.
+        guard !calm, sinceArrival == nil, !failed else { return }
+        let count = 18 + Int(26 * progress)
+        for k in 0..<count {
+            let s = seed(k), life = 1.3 + s.1
+            let ph = fract(t / life + s.0)
+            let start = CGPoint(x: w - 140 - CGFloat(s.1) * 180, y: cy + CGFloat(s.2 - 0.5) * 520)
+            let e = ph * ph
+            let p = CGPoint(x: start.x + (center.x - start.x) * CGFloat(e), y: start.y + (center.y - start.y) * CGFloat(e))
+            let sz = CGFloat(2.5 + 3 * s.2) * CGFloat(1 - 0.6 * ph)
+            let ang = s.0 * 6.28 + t * (1.5 + 2 * s.1)
+            var shard = Path()
+            for j in 0..<3 {
+                let a2 = ang + Double(j) * 2.094
+                let q = CGPoint(x: p.x + CGFloat(cos(a2)) * sz, y: p.y + CGFloat(sin(a2)) * sz)
+                if j == 0 { shard.move(to: q) } else { shard.addLine(to: q) }
+            }
+            shard.closeSubpath()
+            gc.stroke(shard, with: .color(col(sin(ph * .pi) * 0.9)), lineWidth: 0.9)
         }
     }
 
@@ -371,8 +501,11 @@ struct PortalFrame {
             .aspectRatio(contentMode: .fill)
             .frame(width: card.width, height: card.height)
             .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(.white.opacity(0.8), lineWidth: 1.5))
-            .shadow(color: .black.opacity(0.35), radius: 14, y: 6)
+            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(effect == .pet ? Color(red: 0.56, green: 0.83, blue: 1).opacity(0.55) : .white.opacity(0.8),
+                        lineWidth: effect == .pet ? 1 : 1.5))
+            .shadow(color: effect == .pet ? Color(red: 0.3, green: 0.8, blue: 1).opacity(0.35) : .black.opacity(0.35),
+                    radius: 14, y: effect == .pet ? 0 : 6)
             .scaleEffect(0.55 + 0.45 * move)
             .rotationEffect(.degrees(-10 * (1 - move)))
             .opacity(fade)

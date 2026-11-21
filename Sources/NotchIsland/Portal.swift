@@ -1,5 +1,6 @@
 import AppKit
 import Combine
+import CryptoKit
 import MultipeerConnectivity
 import Network
 import NotchIslandCore
@@ -8,7 +9,8 @@ import NotchIslandCore
 ///
 /// Two ways in:
 /// - **Multipeer** (the PortalCompanion iOS app): the Mac advertises `_notch-portal._tcp`, the phone
-///   finds it, and files arrive through `sendResource`. A device sends only after it was allowed once.
+///   finds it, and files arrive through `sendResource`. A phone sends only after pairing: both screens
+///   show the same 6-digit code once, then every connection proves the shared key (`PortalPairing`).
 /// - **HTTP** (iOS Shortcuts, curl): `POST /upload` on the local network with a token from Settings.
 ///
 /// Off until the user turns it on (advertising makes macOS ask for local-network access).
@@ -17,10 +19,16 @@ final class PortalService: ObservableObject {
     static let shared = PortalService()
     nonisolated static let serviceType = "notch-portal"
 
-    /// Devices that are connected right now (Multipeer).
-    @Published private(set) var connected: [String] = []
-    /// Devices allowed to send without asking (persisted by name).
-    @Published private(set) var trusted: [String] = UserDefaults.standard.stringArray(forKey: "portalTrustedDevices") ?? []
+    /// Paired phones (id → name); their keys live in the Keychain.
+    struct Device: Codable, Hashable, Identifiable {
+        var id: String
+        var name: String
+    }
+
+    /// Paired devices that are connected and verified right now.
+    @Published private(set) var connected: Set<String> = []
+    /// Devices paired with this Mac.
+    @Published private(set) var trusted: [Device] = PortalService.loadDevices()
     @Published private(set) var httpStatus: String = ""
     @Published private(set) var lastError: String?
 
@@ -28,6 +36,11 @@ final class PortalService: ObservableObject {
     var onReceived: ((URL, String) -> Void)?
 
     private var multipeer: MultipeerReceiver?
+    private let keys = PortalKeyStore(service: "local.notchisland.portal")
+    /// The Mac's nonce for each connected phone that hasn't proven itself yet.
+    private var challenges: [MCPeerID: Data] = [:]
+    private var pairing: Pairing?
+    private var pairingTimeout: DispatchWorkItem?
     private var http: PortalHTTPServer?
     private var observers: [AnyCancellable] = []
 
@@ -81,29 +94,170 @@ final class PortalService: ObservableObject {
 
     var macName: String { Host.current().localizedName ?? "Mac" }
 
-    func forget(_ device: String) {
-        trusted.removeAll { $0 == device }
-        UserDefaults.standard.set(trusted, forKey: "portalTrustedDevices")
+    /// Stable identity of this Mac in the handshake (phones keep their key under it).
+    nonisolated static var macID: String {
+        let d = UserDefaults.standard
+        if let id = d.string(forKey: "portalMacID") { return id }
+        let id = UUID().uuidString
+        d.set(id, forKey: "portalMacID")
+        return id
     }
 
-    fileprivate func trust(_ device: String) {
-        guard !trusted.contains(device) else { return }
-        trusted.append(device)
-        UserDefaults.standard.set(trusted, forKey: "portalTrustedDevices")
+    private static func loadDevices() -> [Device] {
+        // Trust by name (before pairing existed) is not trust any more: those phones pair once again.
+        UserDefaults.standard.removeObject(forKey: "portalTrustedDevices")
+        guard let data = UserDefaults.standard.data(forKey: "portalDevices") else { return [] }
+        return (try? JSONDecoder().decode([Device].self, from: data)) ?? []
     }
 
-    /// First time a device knocks: ask. Answered once, remembered by device name.
-    fileprivate func shouldAccept(_ device: String) -> Bool {
-        if trusted.contains(device) { return true }
-        NSApp.activate(ignoringOtherApps: true)
-        let alert = NSAlert()
-        alert.messageText = "«\(device)» хочет отправлять файлы на этот Mac"
-        alert.informativeText = "Фото и файлы будут сохраняться в папку «\(Self.folder.lastPathComponent)». Разрешение можно отозвать в настройках NotchIsland → Portal."
-        alert.addButton(withTitle: "Разрешить")
-        alert.addButton(withTitle: "Отклонить")
-        let ok = alert.runModal() == .alertFirstButtonReturn
-        if ok { trust(device) }
-        return ok
+    private func saveDevices() {
+        UserDefaults.standard.set(try? JSONEncoder().encode(trusted), forKey: "portalDevices")
+    }
+
+    func forget(_ id: String) {
+        trusted.removeAll { $0.id == id }
+        saveDevices()
+        keys.remove(id)
+        multipeer?.revoke(device: id)
+        connected.remove(id)
+    }
+
+    // MARK: Handshake
+
+    private struct Pairing {
+        let peer: MCPeerID
+        let device: String
+        let name: String
+        let commit: Data
+        let own = Curve25519.KeyAgreement.PrivateKey()
+        var key: Data?
+        var macAllowed = false
+        var phoneConfirmed = false
+    }
+
+    fileprivate func peerJoined(_ peer: MCPeerID) {
+        let nonce = PortalPairing.nonce()
+        challenges[peer] = nonce
+        multipeer?.send(.hello(mac: Self.macID, nonce: nonce), to: peer)
+    }
+
+    fileprivate func peerLeft(_ peer: MCPeerID) {
+        challenges.removeValue(forKey: peer)
+        if pairing?.peer == peer { endPairing() }
+    }
+
+    fileprivate func handle(_ message: PortalMessage, from peer: MCPeerID) {
+        switch message {
+        case let .auth(device, name, nonce, proof):
+            guard let challenge = challenges[peer] else { return }
+            guard trusted.contains(where: { $0.id == device }), let key = keys.key(for: device) else {
+                return multipeer?.send(.unknown, to: peer) ?? ()
+            }
+            guard PortalPairing.verify(proof, key: key, role: .phone, mac: Self.macID, macNonce: challenge, phoneNonce: nonce) else {
+                debugLog("portal: wrong proof from \(peer.displayName)")
+                challenges.removeValue(forKey: peer)
+                return multipeer?.send(.denied, to: peer) ?? ()
+            }
+            challenges.removeValue(forKey: peer)
+            rename(device, to: name)
+            admit(peer, device: device)
+            multipeer?.send(.welcome(proof: PortalPairing.proof(key: key, role: .mac, mac: Self.macID,
+                                                                 macNonce: challenge, phoneNonce: nonce)), to: peer)
+
+        case let .pair(device, name, commit):
+            // One pairing at a time, and only from a peer we greeted on this connection.
+            guard pairing == nil, challenges[peer] != nil, !device.isEmpty, device.count <= 64 else {
+                return multipeer?.send(.denied, to: peer) ?? ()
+            }
+            let p = Pairing(peer: peer, device: device, name: Self.clean(name), commit: commit)
+            pairing = p
+            multipeer?.send(.pairKey(pub: p.own.publicKey.rawRepresentation), to: peer)
+            let timeout = DispatchWorkItem { [weak self] in
+                MainActor.assumeIsolated {
+                    guard let self, self.pairing?.peer == peer else { return }
+                    self.multipeer?.send(.denied, to: peer)
+                    self.endPairing()
+                }
+            }
+            pairingTimeout = timeout
+            DispatchQueue.main.asyncAfter(deadline: .now() + 120, execute: timeout)
+
+        case let .pairReveal(pub):
+            guard var p = pairing, p.peer == peer, p.key == nil else { return }
+            guard PortalPairing.commitment(to: pub) == p.commit,
+                  let (key, code) = try? PortalPairing.derive(own: p.own, peerPub: pub, phonePub: pub,
+                                                             macPub: p.own.publicKey.rawRepresentation) else {
+                multipeer?.send(.denied, to: peer)
+                return endPairing()
+            }
+            p.key = key
+            pairing = p
+            PortalPairingPanel.shared.show(device: p.name, code: PortalPairing.display(code),
+                                           onAllow: { [weak self] in self?.pairingAllowed() },
+                                           onDeny: { [weak self] in
+                                               self?.multipeer?.send(.denied, to: peer)
+                                               self?.endPairing()
+                                           })
+
+        case .confirm:
+            guard pairing?.peer == peer, pairing?.key != nil else { return }
+            pairing?.phoneConfirmed = true
+            finishPairingIfAgreed()
+
+        case .denied:
+            if pairing?.peer == peer { endPairing() }
+
+        case .hello, .welcome, .unknown, .pairKey, .paired:
+            break   // Mac → phone only
+        }
+    }
+
+    private func pairingAllowed() {
+        pairing?.macAllowed = true
+        if pairing?.phoneConfirmed != true { PortalPairingPanel.shared.waitForPhone() }
+        finishPairingIfAgreed()
+    }
+
+    private func finishPairingIfAgreed() {
+        guard let p = pairing, let key = p.key, p.macAllowed, p.phoneConfirmed else { return }
+        guard keys.set(key, for: p.device) else {
+            lastError = "не удалось сохранить ключ в связке ключей"
+            multipeer?.send(.denied, to: p.peer)
+            return endPairing()
+        }
+        trusted.removeAll { $0.id == p.device }
+        trusted.append(Device(id: p.device, name: p.name))
+        saveDevices()
+        challenges.removeValue(forKey: p.peer)
+        admit(p.peer, device: p.device)
+        multipeer?.send(.paired, to: p.peer)
+        debugLog("portal: paired \(p.name)")
+        endPairing()
+    }
+
+    private func endPairing() {
+        pairing = nil
+        pairingTimeout?.cancel()
+        pairingTimeout = nil
+        PortalPairingPanel.shared.close()
+    }
+
+    private func admit(_ peer: MCPeerID, device: String) {
+        let name = trusted.first { $0.id == device }?.name ?? peer.displayName
+        multipeer?.authorize(peer, device: device, name: name)
+        connected.insert(device)
+    }
+
+    private func rename(_ device: String, to name: String) {
+        let name = Self.clean(name)
+        guard let i = trusted.firstIndex(where: { $0.id == device }), trusted[i].name != name else { return }
+        trusted[i].name = name
+        saveDevices()
+    }
+
+    private static func clean(_ name: String) -> String {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines).filter { !$0.isNewline }
+        return trimmed.isEmpty ? "iPhone" : String(trimmed.prefix(40))
     }
 
     // MARK: HTTP
@@ -174,8 +328,7 @@ extension PortalService: PortalTransferDelegate {
         }
     }
 
-    func peersChanged(_ names: [String]) { connected = names }
-    func allowPeer(_ name: String) -> Bool { shouldAccept(name) }
+    func peersChanged(_ devices: Set<String>) { connected = devices }
 }
 
 @MainActor
@@ -183,8 +336,7 @@ protocol PortalTransferDelegate: AnyObject {
     func transferBegan(id: String, name: String, from: String)
     func transferProgress(id: String, fraction: Double)
     func transferFinished(id: String, file: URL?, from: String, error: String?)
-    func peersChanged(_ names: [String])
-    func allowPeer(_ name: String) -> Bool
+    func peersChanged(_ devices: Set<String>)
 }
 
 // MARK: - Multipeer receiver
@@ -192,13 +344,17 @@ protocol PortalTransferDelegate: AnyObject {
 /// Advertises the Mac and accepts resources. Multipeer calls back on its own queues; everything the
 /// UI needs is sent to the main actor, except moving the finished file (it must happen right away).
 final class MultipeerReceiver: NSObject, MCNearbyServiceAdvertiserDelegate, MCSessionDelegate {
-    weak var delegate: PortalTransferDelegate?
+    weak var delegate: PortalService?
 
     private let peer: MCPeerID
     private let session: MCSession
     private let advertiser: MCNearbyServiceAdvertiser
     private var progressObservers: [String: NSKeyValueObservation] = [:]
     private let lock = NSLock()
+    /// Peers that proved the pairing key: only they may send files. (peer → device id, name)
+    private var authorized: [MCPeerID: (device: String, name: String)] = [:]
+    /// Resources from unverified peers, cancelled at the start; their finish is ignored.
+    private var refused: Set<String> = []
 
     init(name: String) {
         peer = Self.persistentPeerID(name: name)
@@ -235,7 +391,24 @@ final class MultipeerReceiver: NSObject, MCNearbyServiceAdvertiserDelegate, MCSe
         session.disconnect()
     }
 
-    private func onMain(_ work: @escaping @MainActor (PortalTransferDelegate) -> Void) {
+    func send(_ message: PortalMessage, to peer: MCPeerID) {
+        try? session.send(message.encoded(), toPeers: [peer], with: .reliable)
+    }
+
+    func authorize(_ peer: MCPeerID, device: String, name: String) {
+        lock.lock(); authorized[peer] = (device, name); lock.unlock()
+    }
+
+    /// "Забыть": that phone stops being able to send right away.
+    func revoke(device: String) {
+        lock.lock()
+        let peers = authorized.filter { $0.value.device == device }.map(\.key)
+        peers.forEach { authorized.removeValue(forKey: $0) }
+        lock.unlock()
+        peers.forEach { send(.denied, to: $0) }
+    }
+
+    private func onMain(_ work: @escaping @MainActor (PortalService) -> Void) {
         DispatchQueue.main.async { [weak self] in
             MainActor.assumeIsolated { if let d = self?.delegate { work(d) } }
         }
@@ -245,13 +418,9 @@ final class MultipeerReceiver: NSObject, MCNearbyServiceAdvertiserDelegate, MCSe
 
     func advertiser(_ advertiser: MCNearbyServiceAdvertiser, didReceiveInvitationFromPeer peerID: MCPeerID,
                     withContext context: Data?, invitationHandler: @escaping (Bool, MCSession?) -> Void) {
-        let session = session
-        DispatchQueue.main.async { [weak self] in
-            MainActor.assumeIsolated {
-                let ok = self?.delegate?.allowPeer(peerID.displayName) ?? false
-                invitationHandler(ok, ok ? session : nil)
-            }
-        }
+        // Anyone nearby may connect; nothing is accepted until the handshake proves the pairing key.
+        lock.lock(); let crowded = session.connectedPeers.count >= 6; lock.unlock()
+        invitationHandler(!crowded, crowded ? nil : session)
     }
 
     func advertiser(_ advertiser: MCNearbyServiceAdvertiser, didNotStartAdvertisingPeer error: Error) {
@@ -261,30 +430,51 @@ final class MultipeerReceiver: NSObject, MCNearbyServiceAdvertiserDelegate, MCSe
     // MARK: Session
 
     func session(_ session: MCSession, peer peerID: MCPeerID, didChange state: MCSessionState) {
-        let names = session.connectedPeers.map(\.displayName)
-        onMain { $0.peersChanged(names) }
+        lock.lock()
+        if state == .notConnected { authorized.removeValue(forKey: peerID) }
+        let devices = Set(authorized.values.map(\.device))
+        lock.unlock()
+        onMain { gate in
+            gate.peersChanged(devices)
+            if state == .connected { gate.peerJoined(peerID) }
+            if state == .notConnected { gate.peerLeft(peerID) }
+        }
     }
 
     func session(_ session: MCSession, didStartReceivingResourceWithName resourceName: String,
                  fromPeer peerID: MCPeerID, with progress: Progress) {
-        let id = "\(peerID.displayName)/\(resourceName)/\(ObjectIdentifier(progress).hashValue)"
-        let from = peerID.displayName
+        lock.lock()
+        let sender = authorized[peerID]
+        if sender == nil { refused.insert(resourceName + "\u{0}" + peerID.displayName) }
+        lock.unlock()
+        guard let sender else {
+            debugLog("portal: refused \(resourceName) from unverified \(peerID.displayName)")
+            progress.cancel()
+            return
+        }
+        let id = "\(sender.device)/\(resourceName)/\(ObjectIdentifier(progress).hashValue)"
+        let from = sender.name
         onMain { $0.transferBegan(id: id, name: resourceName, from: from) }
         let observer = progress.observe(\.fractionCompleted) { [weak self] p, _ in
             let fraction = p.fractionCompleted
             self?.onMain { $0.transferProgress(id: id, fraction: fraction) }
         }
-        lock.lock(); progressObservers[resourceName + from] = observer; lock.unlock()
+        lock.lock(); progressObservers[resourceName + peerID.displayName] = observer; lock.unlock()
         // The finish callback has no progress object: remember which id belongs to this name.
-        lock.lock(); activeIDs[resourceName + from] = id; lock.unlock()
+        lock.lock(); activeIDs[resourceName + peerID.displayName] = id; lock.unlock()
     }
 
     private var activeIDs: [String: String] = [:]
 
     func session(_ session: MCSession, didFinishReceivingResourceWithName resourceName: String,
                  fromPeer peerID: MCPeerID, at localURL: URL?, withError error: Error?) {
-        let from = peerID.displayName
-        let key = resourceName + from
+        lock.lock()
+        let wasRefused = refused.remove(resourceName + "\u{0}" + peerID.displayName) != nil
+        let from = authorized[peerID]?.name ?? peerID.displayName
+        lock.unlock()
+        // The temporary file of a refused resource is deleted by Multipeer once this returns.
+        guard !wasRefused else { return }
+        let key = resourceName + peerID.displayName
         lock.lock()
         let id = activeIDs.removeValue(forKey: key) ?? key
         progressObservers.removeValue(forKey: key)?.invalidate()
@@ -296,7 +486,10 @@ final class MultipeerReceiver: NSObject, MCNearbyServiceAdvertiserDelegate, MCSe
         onMain { $0.transferFinished(id: id, file: stored, from: from, error: failure) }
     }
 
-    func session(_ session: MCSession, didReceive data: Data, fromPeer peerID: MCPeerID) {}
+    func session(_ session: MCSession, didReceive data: Data, fromPeer peerID: MCPeerID) {
+        guard let message = PortalMessage.decode(data) else { return }
+        onMain { $0.handle(message, from: peerID) }
+    }
     func session(_ session: MCSession, didReceive stream: InputStream, withName streamName: String, fromPeer peerID: MCPeerID) {}
 }
 

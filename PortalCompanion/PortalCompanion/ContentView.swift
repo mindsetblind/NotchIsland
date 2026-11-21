@@ -58,7 +58,13 @@ struct ContentView: View {
                 if case .success(let urls) = result { Task { await outbox.add(files: urls) } }
             }
             .sheet(isPresented: $showSettings) { SettingsSheet(link: link) }
+            .sheet(isPresented: pairingShown) { PairingSheet(link: link) }
         }
+    }
+
+    private var pairingShown: Binding<Bool> {
+        Binding(get: { if case .pairing = link.state { return true } else { return false } },
+                set: { if !$0, case .pairing = link.state { link.cancelPairing() } })
     }
 
     // MARK: Status
@@ -94,16 +100,20 @@ struct ContentView: View {
     private var statusText: String {
         switch link.state {
         case .searching: return link.macs.isEmpty ? "Ищу Mac с NotchIsland…" : "Выбери Mac"
-        case .connecting(let name): return "Подключаюсь к «\(name)»… подтверди на Mac"
+        case .connecting(let name): return "Подключаюсь к «\(name)»…"
+        case .verifying(let name): return "Проверяю «\(name)»…"
+        case .pairing(let name, _, _): return "Сопряжение с «\(name)»"
         case .connected(let name): return "«\(name)» — смахни карточку вправо"
+        case .refused(let name): return "«\(name)» не подключён — выбери Mac, чтобы попробовать снова"
         }
     }
 
     private var dotColor: Color {
         switch link.state {
         case .searching: return .secondary
-        case .connecting: return .orange
+        case .connecting, .verifying, .pairing: return .orange
         case .connected: return .green
+        case .refused: return .red
         }
     }
 
@@ -218,6 +228,39 @@ struct SwipeCard: View {
     }
 }
 
+// MARK: - Pairing
+
+/// First connection to a Mac: the same code must be on both screens.
+struct PairingSheet: View {
+    @ObservedObject var link: PortalLink
+
+    var body: some View {
+        VStack(spacing: 18) {
+            if case let .pairing(mac, code, confirmed) = link.state {
+                Text("Сопряжение с «\(mac)»").font(.headline)
+                if let code {
+                    Text(code).font(.system(size: 44, weight: .light, design: .monospaced)).tracking(2)
+                    Text(confirmed ? "Теперь нажми «Коды совпадают» на Mac" : "Сверь с кодом на экране Mac")
+                        .font(.subheadline).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                    if !confirmed {
+                        Button("Совпадает") { link.confirmPairing() }
+                            .buttonStyle(.borderedProminent).controlSize(.large)
+                    } else {
+                        ProgressView()
+                    }
+                } else {
+                    ProgressView()
+                    Text("Жду ответа Mac…").font(.subheadline).foregroundStyle(.secondary)
+                }
+                Button("Отмена", role: .cancel) { link.cancelPairing() }
+            }
+        }
+        .padding(28)
+        .presentationDetents([.medium])
+        .interactiveDismissDisabled()
+    }
+}
+
 // MARK: - Settings
 
 struct SettingsSheet: View {
@@ -233,7 +276,7 @@ struct SettingsSheet: View {
                 } header: {
                     Text("Как этот iPhone видит Mac")
                 } footer: {
-                    Text("Mac спросит один раз, можно ли принимать файлы от этого имени.")
+                    Text("Имя только для красоты: Mac узнаёт телефон по ключу, который появляется после сверки кода.")
                 }
                 Section("Mac рядом") {
                     if link.macs.isEmpty { Text("Не найдено. Включи Portal в настройках NotchIsland.").foregroundStyle(.secondary) }

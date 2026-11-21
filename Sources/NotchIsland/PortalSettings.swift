@@ -39,17 +39,16 @@ struct PortalSettings: View {
                     Text(settings.portalEnabled ? "Пока никого. Открой PortalCompanion на iPhone рядом." : "Portal выключен")
                         .foregroundStyle(.secondary)
                 }
-                ForEach(devices, id: \.self) { name in
+                ForEach(portal.trusted) { device in
+                    let online = portal.connected.contains(device.id)
                     HStack {
-                        Circle().fill(portal.connected.contains(name) ? Color.green : Color.secondary.opacity(0.4))
+                        Circle().fill(online ? Color.green : Color.secondary.opacity(0.4))
                             .frame(width: 8, height: 8)
-                        Text(name)
-                        Text(portal.connected.contains(name) ? "подключено" : "разрешено")
+                        Text(device.name)
+                        Text(online ? "подключено" : "сопряжено")
                             .font(.caption).foregroundStyle(.secondary)
                         Spacer()
-                        if portal.trusted.contains(name) {
-                            Button("Забыть") { portal.forget(name) }.buttonStyle(.borderless)
-                        }
+                        Button("Забыть") { portal.forget(device.id) }.buttonStyle(.borderless)
                     }
                 }
                 if let error = portal.lastError {
@@ -58,7 +57,7 @@ struct PortalSettings: View {
             } header: {
                 Text("Устройства")
             } footer: {
-                Text("Новое устройство отправляет файлы только после твоего «Разрешить». «Забыть» — спросит снова.")
+                Text("Новый iPhone сначала сопрягается: на обоих экранах появится один и тот же код, его нужно сверить. Потом каждое подключение проверяется ключом, имя телефона ничего не решает. «Забыть» отзывает ключ сразу.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             Section {
@@ -102,10 +101,6 @@ struct PortalSettings: View {
             }
         }
         .formStyle(.grouped)
-    }
-
-    private var devices: [String] {
-        portal.connected + portal.trusted.filter { !portal.connected.contains($0) }
     }
 
     private func copy(_ text: String) {
