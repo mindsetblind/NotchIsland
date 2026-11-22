@@ -6,12 +6,13 @@ import Speech
 @MainActor
 final class PetVoice: ObservableObject {
     enum Failure: LocalizedError {
-        case micDenied, speechDenied, unavailable
+        case micDenied, speechDenied, unavailable, noMicrophone
         var errorDescription: String? {
             switch self {
             case .micDenied: return "Нет доступа к микрофону — разреши его NotchIsland в Системных настройках → Конфиденциальность → Микрофон"
             case .speechDenied: return "Нет доступа к распознаванию речи — разреши его в Системных настройках → Конфиденциальность → Распознавание речи"
             case .unavailable: return "Распознавание русской речи на этом Mac недоступно"
+            case .noMicrophone: return "Не нашёл микрофон — подключи его или открой крышку Mac"
             }
         }
     }
@@ -51,6 +52,11 @@ final class PetVoice: ObservableObject {
 
         let input = engine.inputNode
         let format = input.outputFormat(forBus: 0)
+        // No input device (lid closed, a display without a mic): the format is 0 Hz and installTap would crash.
+        guard format.sampleRate > 0, format.channelCount > 0 else {
+            self.request = nil
+            throw Failure.noMicrophone
+        }
         input.removeTap(onBus: 0)
         input.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] buffer, _ in
             request.append(buffer)
