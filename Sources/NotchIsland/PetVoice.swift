@@ -17,6 +17,10 @@ final class PetVoice: ObservableObject {
     }
 
     @Published private(set) var isListening = false
+    /// `start()` is still waiting for permissions; the microphone isn't on yet.
+    private(set) var isStarting = false
+    /// Stop/cancel came while starting: `start()` must not turn the microphone on.
+    private var stopRequested = false
     /// macOS is showing its microphone / speech permission dialog (the panel must not close meanwhile).
     private(set) var askingPermission = false
     /// 0…1, for the waveform next to the pet.
@@ -33,11 +37,16 @@ final class PetVoice: ObservableObject {
     var onText: ((String) -> Void)?
 
     func start() async throws {
-        guard !isListening else { return }
+        guard !isListening, !isStarting else { return }
+        isStarting = true
+        stopRequested = false
+        defer { isStarting = false }
         askingPermission = true
         let mic = await AVCaptureDevice.requestAccess(for: .audio)
         let status = await withCheckedContinuation { cont in SFSpeechRecognizer.requestAuthorization { cont.resume(returning: $0) } }
         askingPermission = false
+        // The key was released while we waited: don't start a recording nobody is holding.
+        if stopRequested { return }
         guard mic else { throw Failure.micDenied }
         guard status == .authorized else { throw Failure.speechDenied }
         guard let recognizer, recognizer.isAvailable else { throw Failure.unavailable }
@@ -78,6 +87,7 @@ final class PetVoice: ObservableObject {
 
     /// Stops listening and returns the final text (waits briefly for the recognizer to finish).
     func stop() async -> String {
+        if isStarting { stopRequested = true; return "" }
         guard isListening else { return transcript }
         limit?.cancel()
         engine.stop()
@@ -92,6 +102,7 @@ final class PetVoice: ObservableObject {
     }
 
     func cancel() {
+        if isStarting { stopRequested = true }
         task?.cancel()
         if isListening {
             engine.stop()
