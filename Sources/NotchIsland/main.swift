@@ -452,6 +452,9 @@ MainActor.assumeIsolated {
     StatesBenchmark.runIfRequested()
 }
 
+// Writing to a pipe whose reader already exited (e.g. `claude` quit early) must fail the write, not kill the app.
+signal(SIGPIPE, SIG_IGN)
+
 MainActor.assumeIsolated {
     let app = NSApplication.shared
     let delegate = AppDelegate()

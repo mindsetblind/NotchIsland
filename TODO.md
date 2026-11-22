@@ -32,7 +32,7 @@
   Если отпустить клавишу, пока `start()` ещё ждёт разрешений, `stopListening` ничего не делает (`isListening == false`), а запись затем стартует и идёт до лимита.
   Исправление: флаг «отменено до старта», который `start()` проверяет после `await`.
 
-- [ ] **Вероятное падение от SIGPIPE** — `Sources/NotchIsland/PetAssistant.swift:161`.
+- [x] **Вероятное падение от SIGPIPE** — `Sources/NotchIsland/PetAssistant.swift:161`.
   Запись в stdin уже завершившегося `claude` убьёт всё приложение: SIGPIPE нигде не игнорируется.
   Исправление: `signal(SIGPIPE, SIG_IGN)` в начале `main.swift`.
 
