@@ -38,7 +38,9 @@ final class HotKey {
                                          EventHotKeyID(signature: OSType(0x4E49_4B59), id: id), // "NIKY"
                                          GetApplicationEventTarget(), 0, &hotKeyRef)
         if status != noErr {
+            // deinit still runs after a failed init: forget the handler here so it isn't removed twice.
             if let handlerRef { RemoveEventHandler(handlerRef) }
+            handlerRef = nil
             return nil
         }
     }
