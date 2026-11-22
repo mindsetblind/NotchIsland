@@ -1,4 +1,5 @@
 import AppKit
+import NotchIslandCore
 
 /// Coding agents the island can follow through their hooks. Both use the same hook format
 /// (Claude Code's `settings.json` → `hooks`, Codex's `~/.codex/hooks.json` → `hooks`).
@@ -68,7 +69,7 @@ enum AgentHooks {
     static var anyInstalled: Bool { CodingAgent.allCases.contains { isInstalled($0) } }
 
     static func isInstalled(_ agent: CodingAgent) -> Bool {
-        guard let hooks = readSettings(agent)["hooks"] as? [String: Any] else { return false }
+        guard let hooks = (try? readSettings(agent))?["hooks"] as? [String: Any] else { return false }
         return hooks.values.contains { groups in
             (groups as? [[String: Any]] ?? []).contains { group in
                 (group["hooks"] as? [[String: Any]] ?? []).contains { ($0["command"] as? String)?.contains(marker) == true }
@@ -76,10 +77,28 @@ enum AgentHooks {
         }
     }
 
-    private static func readSettings(_ agent: CodingAgent) -> [String: Any] {
-        guard let data = try? Data(contentsOf: settingsURL(agent)),
-              let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { return [:] }
-        return json
+    /// Throws when the file exists but can't be understood — then nothing must be written over it.
+    private static func readSettings(_ agent: CodingAgent) throws -> [String: Any] {
+        try HookSettingsFile.read(at: settingsURL(agent))
+    }
+
+    /// Current settings, or nil after telling the user why the file is left alone.
+    private static func readForChange(_ agent: CodingAgent) -> [String: Any]? {
+        do {
+            return try readSettings(agent)
+        } catch {
+            let alert = NSAlert()
+            alert.alertStyle = .warning
+            alert.messageText = "Не удалось прочитать \(settingsURL(agent).path)"
+            alert.informativeText = """
+            \(error)
+
+            NotchIsland ничего не изменил, чтобы не затереть твои настройки \(agent.name). Исправь файл (или убери его, если он не нужен) и попробуй ещё раз.
+            """
+            NSApp.activate(ignoringOtherApps: true)
+            alert.runModal()
+            return nil
+        }
     }
 
     /// Settings with our hook entries removed (everything else untouched).
@@ -136,8 +155,8 @@ enum AgentHooks {
         alert.addButton(withTitle: "Подключить")
         alert.addButton(withTitle: "Отмена")
         NSApp.activate(ignoringOtherApps: true)
-        guard alert.runModal() == .alertFirstButtonReturn else { return }
-        write(withOurs(readSettings(agent), agent), to: url)
+        guard alert.runModal() == .alertFirstButtonReturn, let settings = readForChange(agent) else { return }
+        write(withOurs(settings, agent), to: url)
     }
 
     static func uninstall(_ agent: CodingAgent) {
@@ -148,8 +167,8 @@ enum AgentHooks {
         alert.addButton(withTitle: "Отключить")
         alert.addButton(withTitle: "Отмена")
         NSApp.activate(ignoringOtherApps: true)
-        guard alert.runModal() == .alertFirstButtonReturn else { return }
-        write(withoutOurs(readSettings(agent)), to: url)
+        guard alert.runModal() == .alertFirstButtonReturn, let settings = readForChange(agent) else { return }
+        write(withoutOurs(settings), to: url)
     }
 
     private static func write(_ settings: [String: Any], to url: URL) {
@@ -160,7 +179,7 @@ enum AgentHooks {
             let backup = url.deletingLastPathComponent().appendingPathComponent("\(url.lastPathComponent).notchisland-backup-\(stamp)")
             try? fm.copyItem(at: url, to: backup)
         }
-        guard let data = try? JSONSerialization.data(withJSONObject: settings, options: [.prettyPrinted, .withoutEscapingSlashes]) else {
+        guard let data = try? JSONSerialization.data(withJSONObject: settings, options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]) else {
             return
         }
         do {
