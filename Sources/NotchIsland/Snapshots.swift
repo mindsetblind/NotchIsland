@@ -116,7 +116,7 @@ enum Snapshots {
             peek("music", .music, CompactMusicView(model: model))
             peek("agent", .agent, AgentCompactView(model: model, claude: model.claude))
             peek("agent done", .agentPeek, AgentPeekView(model: model, peek: AgentPeek(project: "NotchIsland", text: "готово", mood: .happy)))
-            peek("agent waits", .agentPeek, AgentPeekView(model: model, peek: AgentPeek(project: "Java practice", text: "ждёт ответа", mood: .attention)))
+            peek("agent waits", .agentPeek, AgentPeekView(model: model, peek: AgentPeek(project: "Weather app", text: "ждёт ответа", mood: .attention)))
             peek("charging", .charging, ChargingPeekView(model: model))
             peek("build running", .notice, NoticeView(model: model, notice: Notice(
                 symbol: "hammer.fill", title: "swift build", startedAt: Date().addingTimeInterval(-83), spinning: true)))
@@ -135,11 +135,11 @@ enum Snapshots {
                 PomodoroPeek(title: "Перерыв окончен", subtitle: "пора за работу", phase: .focus)))
             peek("pomodoro", .pomodoro, PomodoroCompactView(model: model, pomodoro: model.pomodoro))
             peek("airpods", .device, DevicePeekView(model: model, event:
-                DeviceEvent(name: "AirPods Pro — Иван", symbol: "airpodspro", connected: true, battery: 85, detail: "L 85% · R 90%")))
+                DeviceEvent(name: "AirPods Pro", symbol: "airpodspro", connected: true, battery: 85, detail: "L 85% · R 90%")))
             peek("keyboard", .device, DevicePeekView(model: model, event:
                 DeviceEvent(name: "Magic Keyboard с Touch ID", symbol: "keyboard", connected: true)))
             peek("disconnected", .device, DevicePeekView(model: model, event:
-                DeviceEvent(name: "AirPods Pro — Иван", symbol: "airpodspro", connected: false)))
+                DeviceEvent(name: "AirPods Pro", symbol: "airpodspro", connected: false)))
             peek("drive", .device, DevicePeekView(model: model, event:
                 DeviceEvent(name: "Transcend 64GB", symbol: "externaldrive.fill", connected: true, detail: "свободно 12,3 ГБ")))
         }
@@ -160,9 +160,9 @@ enum Snapshots {
             PomodoroPeek(title: "Перерыв окончен", subtitle: "пора за работу", phase: .focus)))
         save("compact-pomodoro", ears(.pomodoro), PomodoroCompactView(model: model, pomodoro: model.pomodoro))
         let devices = [
-            DeviceEvent(name: "AirPods Pro — Иван", symbol: "airpodspro", connected: true, battery: 85, detail: "L 85% · R 90%"),
+            DeviceEvent(name: "AirPods Pro", symbol: "airpodspro", connected: true, battery: 85, detail: "L 85% · R 90%"),
             DeviceEvent(name: "Magic Keyboard с Touch ID", symbol: "keyboard", connected: true),
-            DeviceEvent(name: "AirPods Pro — Иван", symbol: "airpodspro", connected: false),
+            DeviceEvent(name: "AirPods Pro", symbol: "airpodspro", connected: false),
             DeviceEvent(name: "Transcend 64GB", symbol: "externaldrive.fill", connected: true, detail: "свободно 12,3 ГБ"),
         ]
         for (n, e) in devices.enumerated() {
@@ -683,9 +683,9 @@ enum PetPanelCapture {
         let size = NSSize(width: PetPanelController.contentWidth + 20 + 48, height: 420)
         let sources = [
             PetMusicSource(uri: "spotify:user:me:collection", name: "Любимые треки", kind: .liked, subtitle: "Медиатека"),
-            PetMusicSource(uri: "spotify:playlist:1", name: "Для бега", kind: .playlist, subtitle: "Плейлист · ivan"),
+            PetMusicSource(uri: "spotify:playlist:1", name: "Для бега", kind: .playlist, subtitle: "Плейлист · вы"),
             PetMusicSource(uri: "spotify:playlist:2", name: "Deep Focus", kind: .playlist, subtitle: "Плейлист · Spotify"),
-            PetMusicSource(uri: "spotify:playlist:3", name: "Дорога", kind: .playlist, subtitle: "Плейлист · ivan"),
+            PetMusicSource(uri: "spotify:playlist:3", name: "Дорога", kind: .playlist, subtitle: "Плейлист · вы"),
             PetMusicSource(uri: "spotify:album:4", name: "In Rainbows", kind: .album, subtitle: "Альбом · Radiohead"),
         ]
         var tagged = PetContext()
