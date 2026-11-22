@@ -335,7 +335,7 @@ final class PetAssistant: ObservableObject {
 
     /// Key released / mic button: what was said becomes the request.
     func stopListening(submit: Bool = true) {
-        guard voice.isListening else { return }
+        guard voice.isListening || voice.isStarting else { return }
         Task {
             let text = await voice.stop().trimmingCharacters(in: .whitespacesAndNewlines)
             query = text

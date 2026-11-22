@@ -28,7 +28,7 @@
   Без устройства ввода (закрытая крышка, монитор без микрофона) `inputNode.outputFormat` даёт 0 Гц, и `installTap` бросает исключение.
   Исправление: проверять `format.sampleRate > 0 && format.channelCount > 0`, иначе `throw Failure.unavailable`.
 
-- [ ] **Голос питомца: микрофон остаётся включённым до 60 с** — `Sources/NotchIsland/PetAssistant.swift:325`–`344`, `PetVoice.swift:35`.
+- [x] **Голос питомца: микрофон остаётся включённым до 60 с** — `Sources/NotchIsland/PetAssistant.swift:325`–`344`, `PetVoice.swift:35`.
   Если отпустить клавишу, пока `start()` ещё ждёт разрешений, `stopListening` ничего не делает (`isListening == false`), а запись затем стартует и идёт до лимита.
   Исправление: флаг «отменено до старта», который `start()` проверяет после `await`.
 
