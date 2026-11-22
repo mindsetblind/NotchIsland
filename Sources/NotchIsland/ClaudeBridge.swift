@@ -6,8 +6,9 @@ import SwiftUI
 struct ClaudeSession: Identifiable, Equatable {
     enum Status: Equatable { case idle, working, waiting, done }
 
-    let id: String                 // Claude Code session_id
+    let id: String                 // the agent's session_id
     var cwd: String
+    var agent: CodingAgent = .claude
     var status: Status = .idle
     var activity: String = ""
     var updatedAt = Date()
@@ -25,6 +26,7 @@ struct PermissionAsk: Identifiable, Equatable {
     let detail: String             // the command / file path
     let suggestions: [Any]         // permission_suggestions, echoed back for "Always"
     let connection: Int32          // socket to answer on
+    var agent: CodingAgent = .claude
 
     static func == (a: PermissionAsk, b: PermissionAsk) -> Bool { a.id == b.id }
 }
@@ -100,13 +102,15 @@ final class ClaudeMonitor: ObservableObject {
         }
         let cwd = e["cwd"] as? String ?? ""
         let pid = Self.hostApp(from: e["ancestor_pids"] as? [Int])
+        let agent = CodingAgent(eventValue: e["agent"] as? String)
         var s = sessions.first { $0.id == sid } ?? ClaudeSession(id: sid, cwd: cwd)
+        s.agent = agent
         s.cwd = cwd.isEmpty ? s.cwd : cwd
         s.appPID = pid ?? s.appPID
         s.updatedAt = Date()
 
         if name != "PermissionRequest" { close(fd) }
-        debugLog("claude: \(name) session=\(sid.prefix(8)) tool=\(e["tool_name"] as? String ?? "-")")
+        debugLog("\(agent.rawValue): \(name) session=\(sid.prefix(8)) tool=\(e["tool_name"] as? String ?? "-")")
 
         switch name {
         case "SessionStart":
@@ -128,7 +132,7 @@ final class ClaudeMonitor: ObservableObject {
             let tool = e["tool_name"] as? String ?? "Инструмент"
             let (title, detail) = Self.permissionText(tool: tool, input: e["tool_input"] as? [String: Any])
             let ask = PermissionAsk(sessionID: sid, project: s.project, toolName: tool, title: title, detail: detail,
-                                    suggestions: e["permission_suggestions"] as? [Any] ?? [], connection: fd)
+                                    suggestions: e["permission_suggestions"] as? [Any] ?? [], connection: fd, agent: agent)
             withAnimation(IslandModel.open) { permissions.append(ask) }
             watchHangup(ask)
             if AppSettings.shared.claudeSounds { NSSound(named: "Tink")?.play() }
@@ -180,7 +184,7 @@ final class ClaudeMonitor: ObservableObject {
         guard permissions.contains(ask) else { return }
         hangupWatchers.removeValue(forKey: ask.id)?.cancel()
         close(ask.connection)
-        debugLog("claude: permission request withdrawn by Claude Code")
+        debugLog("\(ask.agent.rawValue): permission request withdrawn")
         withAnimation(IslandModel.close) {
             permissions.removeAll { $0.id == ask.id }
             if let i = sessions.firstIndex(where: { $0.id == ask.sessionID }) {
@@ -205,7 +209,7 @@ final class ClaudeMonitor: ObservableObject {
         case .always:
             // Echo Claude Code's own suggestion ("always allow this kind of call") as the permission update.
             decision = ["behavior": "allow"]
-            if !ask.suggestions.isEmpty { decision?["updatedPermissions"] = ask.suggestions }
+            if !ask.suggestions.isEmpty, ask.agent == .claude { decision?["updatedPermissions"] = ask.suggestions }
         case .deny:
             decision = ["behavior": "deny", "message": "Отклонено в NotchIsland"]
         case .terminal:
@@ -258,8 +262,11 @@ final class ClaudeMonitor: ObservableObject {
         case "Edit", "MultiEdit": return "Правит \(file(input))"
         case "Write": return "Пишет \(file(input))"
         case "NotebookEdit": return "Правит \(file(input))"
-        case "Bash":
-            let cmd = (input?["description"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? input?["command"] as? String ?? ""
+        case "apply_patch", "ApplyPatch":
+            let files = patchFiles(input)
+            return files.isEmpty ? "Правит файлы" : "Правит \(files.map { ($0 as NSString).lastPathComponent }.joined(separator: ", "))"
+        case "Bash", "exec_command", "shell", "local_shell":
+            let cmd = (input?["description"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? commandText(input)
             return "Запускает: \(cmd)"
         case "Grep", "Glob": return "Ищет \(input?["pattern"] as? String ?? "")"
         case "WebFetch", "WebSearch": return "Ищет в интернете"
@@ -272,7 +279,9 @@ final class ClaudeMonitor: ObservableObject {
 
     static func permissionText(tool: String, input: [String: Any]?) -> (String, String) {
         switch tool {
-        case "Bash": return ("Запустить команду", input?["command"] as? String ?? "")
+        case "Bash", "exec_command", "shell", "local_shell":
+            return ("Запустить команду", commandText(input))
+        case "apply_patch", "ApplyPatch": return ("Изменить файлы", patchFiles(input).joined(separator: ", "))
         case "Edit", "MultiEdit", "NotebookEdit": return ("Изменить файл", input?["file_path"] as? String ?? file(input))
         case "Write": return ("Создать файл", input?["file_path"] as? String ?? file(input))
         case "Read": return ("Прочитать файл", input?["file_path"] as? String ?? file(input))
@@ -282,6 +291,25 @@ final class ClaudeMonitor: ObservableObject {
             let compact = input.flatMap { try? JSONSerialization.data(withJSONObject: $0) }
                 .flatMap { String(data: $0, encoding: .utf8) } ?? ""
             return ("Использовать \(tool)", String(compact.prefix(200)))
+        }
+    }
+
+    /// Codex sends a shell command as a string or as an argv array.
+    private static func commandText(_ input: [String: Any]?) -> String {
+        if let s = input?["command"] as? String ?? input?["cmd"] as? String { return s }
+        if let argv = input?["command"] as? [String] { return argv.joined(separator: " ") }
+        return ""
+    }
+
+    /// Codex's apply_patch text ("*** Begin Patch … *** Update File: path …").
+    private static func patchText(_ input: [String: Any]?) -> String {
+        input?["patch"] as? String ?? input?["input"] as? String ?? input?["command"] as? String ?? ""
+    }
+
+    static func patchFiles(_ input: [String: Any]?) -> [String] {
+        let heads = ["*** Update File: ", "*** Add File: ", "*** Delete File: "]
+        return patchText(input).components(separatedBy: "\n").compactMap { line in
+            heads.first(where: line.hasPrefix).map { String(line.dropFirst($0.count)).trimmingCharacters(in: .whitespaces) }
         }
     }
 
@@ -298,6 +326,11 @@ final class ClaudeMonitor: ObservableObject {
             return "+\(added) −\(removed)"
         case "Write":
             return "+\(lines(input?["content"] as? String))"
+        case "apply_patch", "ApplyPatch":
+            let body = patchText(input).components(separatedBy: "\n")
+            let added = body.filter { $0.hasPrefix("+") && !$0.hasPrefix("+++") }.count
+            let removed = body.filter { $0.hasPrefix("-") && !$0.hasPrefix("---") }.count
+            return added + removed == 0 ? nil : "+\(added) −\(removed)"
         default:
             return nil
         }

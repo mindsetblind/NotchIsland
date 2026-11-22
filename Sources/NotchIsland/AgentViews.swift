@@ -19,7 +19,7 @@ struct PermissionCardView: View {
                 .padding(.leading, IslandModel.inset - 4)
                 .frame(maxWidth: .infinity, alignment: .leading)
             } right: {
-                Text(claude.permissions.count > 1 ? "ещё \(claude.permissions.count - 1)" : "Claude Code")
+                Text(claude.permissions.count > 1 ? "ещё \(claude.permissions.count - 1)" : ask.agent.name)
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(.secondary)
                     .padding(.trailing, IslandModel.inset)
@@ -44,7 +44,7 @@ struct PermissionCardView: View {
                         .buttonStyle(.plain)
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
-                        .help("Не отвечать здесь — Claude Code спросит в терминале")
+                        .help("Не отвечать здесь — \(ask.agent.name) спросит у себя, как обычно")
                     Spacer()
                     AnswerButton(title: "Запретить", style: .secondary) { claude.answer(ask, .deny) }
                     if !ask.suggestions.isEmpty {
@@ -293,7 +293,7 @@ struct AgentsTab: View {
     @ObservedObject var model: IslandModel
     @ObservedObject var claude: ClaudeMonitor
     @ObservedObject var tracker: DevTaskTracker
-    @State private var installed = ClaudeHooks.isInstalled
+    @State private var installed = AgentHooks.anyInstalled
 
     var body: some View {
         Group {
@@ -312,12 +312,16 @@ struct AgentsTab: View {
                 HStack(spacing: 14) {
                     faceTile(.sleeping)
                     VStack(alignment: .leading, spacing: 10) {
-                        Text("Подключи Claude Code — остров покажет, что делает агент, и спросит разрешения")
+                        Text("Подключи Claude Code или Codex — остров покажет, что делает агент, и спросит разрешения")
                             .font(.system(size: 13))
                             .fixedSize(horizontal: false, vertical: true)
-                        PillButton(title: "Подключить") {
-                            ClaudeHooks.install()
-                            installed = ClaudeHooks.isInstalled
+                        HStack(spacing: 8) {
+                            ForEach(CodingAgent.allCases) { agent in
+                                PillButton(title: agent.name) {
+                                    AgentHooks.install(agent)
+                                    installed = AgentHooks.anyInstalled
+                                }
+                            }
                         }
                     }
                     Spacer(minLength: 0)
@@ -327,7 +331,7 @@ struct AgentsTab: View {
                     faceTile(.idle)
                     VStack(alignment: .leading, spacing: 4) {
                         Text("Нет активных сессий").font(.system(size: 13))
-                        Text("Запусти Claude Code — сессии появятся здесь")
+                        Text("Запусти Claude Code или Codex — сессии появятся здесь")
                             .font(.system(size: 11)).foregroundStyle(.secondary)
                     }
                     Spacer(minLength: 0)
@@ -343,7 +347,7 @@ struct AgentsTab: View {
                 }
             }
         }
-        .onAppear { installed = ClaudeHooks.isInstalled }
+        .onAppear { installed = AgentHooks.anyInstalled }
     }
 
     /// The big cat here stays calm whatever the agents do (their state is in the list next to it);
@@ -423,7 +427,10 @@ private struct SessionRow: View {
         HStack(spacing: 10) {
             PetFace(mood: mood, size: 12).frame(width: 22)
             VStack(alignment: .leading, spacing: 1) {
-                Text(session.project).font(.system(size: 12)).lineLimit(1)
+                HStack(spacing: 5) {
+                    Text(session.project).font(.system(size: 12)).lineLimit(1)
+                    Text(session.agent.name).font(.system(size: 10)).foregroundStyle(.tertiary).lineLimit(1)
+                }
                 Text(session.activity).font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
             }
             Spacer(minLength: 6)

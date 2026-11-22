@@ -29,6 +29,10 @@ func ancestorPIDs() -> [Int32] {
     return pids
 }
 event["ancestor_pids"] = ancestorPIDs()
+// `--source codex` when Codex runs us (same hook format as Claude Code); default is Claude Code.
+if let i = CommandLine.arguments.firstIndex(of: "--source"), i + 1 < CommandLine.arguments.count {
+    event["agent"] = CommandLine.arguments[i + 1]
+}
 
 let fd = socket(AF_UNIX, SOCK_STREAM, 0)
 guard fd >= 0 else { quietExit() }

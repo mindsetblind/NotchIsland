@@ -39,7 +39,7 @@ struct SettingsView: View {
             PeekSettings(calendar: model.calendar).tabItem { Label("Уведомления", systemImage: "bell.badge") }
             MusicSettings(model: model).tabItem { Label("Музыка", systemImage: "music.note") }
             ClipboardSettings(history: model.clipboard).tabItem { Label("Буфер", systemImage: "doc.on.clipboard") }
-            ClaudeSettings().tabItem { Label("Claude Code", systemImage: "eyes") }
+            ClaudeSettings().tabItem { Label("Агенты", systemImage: "eyes") }
             DeveloperSettings().tabItem { Label("Разработка", systemImage: "hammer") }
             ToolSettings(model: model).tabItem { Label("Инструменты", systemImage: "wrench.and.screwdriver") }
             HomeSettings(home: SmartHomeController.shared).tabItem { Label("Дом", systemImage: "house") }
@@ -190,7 +190,7 @@ extension PeekSettings {
     static func title(_ kind: ActivityKind) -> String {
         switch kind {
         case .pomodoro: return "Помидор"
-        case .agent: return "Claude Code работает"
+        case .agent: return "Агент работает"
         case .developer: return "Задачи разработчика (сборки, тесты)"
         case .music: return "Музыка"
         default: return kind.rawValue
@@ -311,38 +311,46 @@ private struct MusicSettings: View {
 
 private struct ClaudeSettings: View {
     @ObservedObject private var settings = AppSettings.shared
-    @State private var installed = ClaudeHooks.isInstalled
 
     var body: some View {
         Form {
-            Section {
-                HStack {
-                    if installed {
-                        Label("Подключено", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
-                        Spacer()
-                        Button("Отключить…") { ClaudeHooks.uninstall(); installed = ClaudeHooks.isInstalled }
-                    } else {
-                        Text("Не подключено").foregroundStyle(.secondary)
-                        Spacer()
-                        Button("Подключить…") { ClaudeHooks.install(); installed = ClaudeHooks.isInstalled }
-                    }
-                }
-            } header: {
-                Text("Claude Code")
-            } footer: {
-                Text("Добавляет хуки в \(ClaudeHooks.settingsURL.path) (с резервной копией). Остров показывает сессии и их действия, «готово» и «ждёт ответа». Если остров не запущен, Claude Code работает как обычно.")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
+            ForEach(CodingAgent.allCases) { AgentHookSection(agent: $0) }
             Section {
                 Toggle("Спрашивать разрешения в острове", isOn: $settings.claudePermissionsInIsland)
                 Toggle("Звуки (запрос разрешения, готово)", isOn: $settings.claudeSounds)
             } footer: {
-                Text("Если выключить разрешения, Claude Code будет спрашивать их в терминале, а остров — только показывать статус.")
+                Text("Если выключить разрешения, агент будет спрашивать их у себя, а остров — только показывать статус.")
                     .font(.caption).foregroundStyle(.secondary)
             }
         }
         .formStyle(.grouped)
-        .onAppear { installed = ClaudeHooks.isInstalled }
+    }
+}
+
+private struct AgentHookSection: View {
+    let agent: CodingAgent
+    @State private var installed = false
+
+    var body: some View {
+        Section {
+            HStack {
+                if installed {
+                    Label("Подключено", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
+                    Spacer()
+                    Button("Отключить…") { AgentHooks.uninstall(agent); installed = AgentHooks.isInstalled(agent) }
+                } else {
+                    Text("Не подключено").foregroundStyle(.secondary)
+                    Spacer()
+                    Button("Подключить…") { AgentHooks.install(agent); installed = AgentHooks.isInstalled(agent) }
+                }
+            }
+        } header: {
+            Text(agent.name)
+        } footer: {
+            Text("Добавляет хуки в \(AgentHooks.settingsURL(agent).path) (с резервной копией). Остров показывает сессии и их действия, «готово» и «ждёт ответа». Если остров не запущен, \(agent.name) работает как обычно.")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+        .onAppear { installed = AgentHooks.isInstalled(agent) }
     }
 }
 
