@@ -1,0 +1,43 @@
+# Builds NotchIsland and runs the unit tests on every pull request and every push to main.
+# A red check means: don't merge, don't release.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# A new push to the same branch cancels the run that is still going.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Toolchain
+        run: |
+          sw_vers
+          swift --version
+
+      # SwiftPM checkouts and build products; keyed by the pinned dependencies (Sparkle).
+      - uses: actions/cache@v4
+        with:
+          path: .build
+          key: spm-${{ runner.os }}-${{ hashFiles('Package.resolved', 'Package.swift') }}
+          restore-keys: spm-${{ runner.os }}-
+
+      - name: Build
+        run: swift build
+
+      - name: Test
+        run: swift test
+
+      # Compiled by build.sh into the app bundle; checked here so a broken bridge shows up before a release.
+      - name: Now Playing bridge
+        run: clang -dynamiclib -fobjc-arc -O2 -framework Foundation -o "$RUNNER_TEMP/NowPlayingBridge.dylib" Helper/NowPlayingBridge.m

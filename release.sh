@@ -15,6 +15,10 @@ if [[ "$DRY" != "--dry" ]]; then
     git rev-parse "v$VERSION" >/dev/null 2>&1 && { echo "Версия $VERSION уже выпущена."; exit 1; }
 fi
 
+# Never publish a build whose tests fail (the same check CI runs on every push).
+echo "Прогоняю тесты…"
+swift test -q || { echo "Тесты не прошли — релиз отменён."; exit 1; }
+
 REPO=$(git remote get-url origin | sed -E 's#.*github.com[:/](.*)\.git$#\1#; s#.*github.com[:/](.*)$#\1#')
 PB=/usr/libexec/PlistBuddy
 OLD_VERSION=$($PB -c "Print CFBundleShortVersionString" Info.plist)
