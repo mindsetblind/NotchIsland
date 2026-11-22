@@ -279,14 +279,28 @@ struct ChargingPeekView: View {
 
 struct ExpandedView: View {
     @ObservedObject var model: IslandModel
-    /// The tab whose dot is under the pointer: its name shows in the header.
+    /// The tab whose icon is under the pointer: its name shows in the header.
     @State private var hoveredTab: IslandTab?
+    /// Right after switching (a swipe especially) the header names the new tab for a moment.
+    @State private var announcedTab: IslandTab?
+    @State private var announceTask: Task<Void, Never>?
 
     var body: some View {
         VStack(spacing: 0) {
             // Quiet header: the pet acting out the tab (or the dash you point at), settings and quit.
             EarsLayout(notchWidth: model.notchSize.width, height: model.notchSize.height) {
-                TabPet(model: model, claude: model.claude, tab: hoveredTab ?? model.selectedTab)
+                HStack(spacing: 7) {
+                    TabPet(model: model, claude: model.claude, tab: hoveredTab ?? model.selectedTab)
+                    if let named = hoveredTab ?? announcedTab {
+                        Text(named.title)
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(.white.opacity(0.6))
+                            .lineLimit(1)
+                            .id(named)
+                            .transition(.opacity)
+                    }
+                }
+                .animation(.easeOut(duration: 0.15), value: hoveredTab ?? announcedTab)
                     .padding(.leading, IslandModel.inset - 4)
                     .frame(maxWidth: .infinity, alignment: .leading)
             } right: {
@@ -333,6 +347,15 @@ struct ExpandedView: View {
                     .transition(.islandContent(scale: 0.96))
             }
         }
+        .onChange(of: model.selectedTab) { _, tab in
+            announcedTab = tab
+            announceTask?.cancel()
+            announceTask = Task { @MainActor in
+                try? await Task.sleep(for: .seconds(1.4))
+                guard !Task.isCancelled else { return }
+                announcedTab = nil
+            }
+        }
     }
 }
 
@@ -366,8 +389,8 @@ struct TabPet: View {
     }
 }
 
-/// Tabs as a row of short dashes under the content: the current one is long and white.
-/// Pointing at a dash shows the tab's name in the header.
+/// Tabs as a row of small icons under the content: the current one is white, the rest dim.
+/// Pointing at an icon shows the tab's name in the header.
 struct TabBar: View {
     @ObservedObject var model: IslandModel
     @Binding var hovered: IslandTab?
@@ -380,14 +403,16 @@ struct TabBar: View {
                 // A file waits on the shelf: its dash stays a little brighter.
                 let waiting = tab == .shelf && !model.shelf.isEmpty
                 Button { model.selectTab(tab) } label: {
-                    Capsule()
-                        .fill(.white.opacity(selected ? 1 : lit ? 0.7 : waiting ? 0.55 : 0.25))
-                        .frame(width: selected ? 14 : 5, height: 2)
-                        .frame(width: 22, height: 14)
+                    Image(systemName: tab.symbol)
+                        .font(.system(size: 9, weight: selected ? .semibold : .regular))
+                        .foregroundStyle(.white.opacity(selected ? 1 : lit ? 0.7 : waiting ? 0.55 : 0.28))
+                        .scaleEffect(selected ? 1.15 : 1)
+                        .frame(width: 26, height: 16)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .onHover { h in hovered = h ? tab : (hovered == tab ? nil : hovered) }
+                .help(tab.title)
                 .accessibilityLabel(tab.title)
                 .accessibilityAddTraits(selected ? [.isSelected] : [])
             }

@@ -29,7 +29,7 @@ enum IslandTab: String, CaseIterable, Identifiable {
         case .apps: return "square.grid.2x2.fill"
         case .shelf: return "tray.fill"
         case .clipboard: return "doc.on.clipboard"
-        case .agents: return "eyes"
+        case .agents: return "terminal.fill"
         case .tools: return "wrench.and.screwdriver.fill"
         }
     }
@@ -276,7 +276,7 @@ final class IslandModel: ObservableObject {
     static let inset: CGFloat = 22          // left/right padding of everything inside
     static let artworkSize: CGFloat = 92
     static let contentTop: CGFloat = 10     // below the header row (its text already sits mid-row)
-    static let contentBottom: CGFloat = 28   // room for the tab dashes
+    static let contentBottom: CGFloat = 28   // room for the tab icons
     static let playlistHeight: CGFloat = 230
 
     /// Width of each "ear" when only the pet is shown (it sits in the right one).

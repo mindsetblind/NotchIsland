@@ -29,39 +29,71 @@ final class FirstMouseHostingView<Content: View>: NSHostingView<Content> {
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var swipeDX: CGFloat = 0, swipeDY: CGFloat = 0
-    private var swipeDone = false, swipeOverScroller = false
+    private var swipeDone = false
+    /// A sideways row (clipboard, apps, shelf) under the pointer when the gesture began, and whether it
+    /// could still scroll back / forward then. nil = the gesture started elsewhere.
+    private var swipeRow: (canBack: Bool, canForward: Bool)?
+    /// Over a row: undecided for the first few points, then either the row scrolls (`pass`) or, when
+    /// the row is already at its end in that direction, the gesture switches tabs (`tabs`).
+    private enum SwipeMode { case undecided, tabs, pass }
+    private var swipeMode = SwipeMode.undecided
 
-    /// Trackpad swipe → neighbouring tab, once per gesture.
-    private func handleSwipe(_ event: NSEvent) -> Bool {
-        guard model.isExpanded, model.state == .expanded, event.hasPreciseScrollingDeltas else { return false }
+    /// Trackpad swipe → neighbouring tab, once per gesture. Returns the event to deliver (nil = swallowed).
+    private func handleSwipe(_ event: NSEvent) -> NSEvent? {
+        guard model.isExpanded, model.state == .expanded, event.hasPreciseScrollingDeltas else { return event }
         if event.phase == .began {
-            swipeDX = 0; swipeDY = 0; swipeDone = false
-            swipeOverScroller = scrollsSideways(at: event.locationInWindow)
+            swipeDX = 0; swipeDY = 0; swipeDone = false; swipeMode = .undecided
+            swipeRow = sidewaysRow(at: event.locationInWindow)
         }
-        if swipeOverScroller { return false }
-        if event.phase == .changed || event.phase == .began {
+        if event.phase == .began || event.phase == .changed {
             swipeDX += event.scrollingDeltaX
             swipeDY += event.scrollingDeltaY
-            if !swipeDone, abs(swipeDX) > 40, abs(swipeDX) > 1.5 * abs(swipeDY) {
+            // Where the fingers went, whatever the "natural scrolling" setting: left → next tab.
+            let finger = event.isDirectionInvertedFromDevice ? swipeDX : -swipeDX
+            let sideways = abs(swipeDX) > 1.5 * abs(swipeDY)
+            if swipeMode == .undecided, let row = swipeRow, abs(swipeDX) + abs(swipeDY) > 8 {
+                // Fingers left = the row's content moves left = it needs room to scroll forward.
+                let rowCanMove = finger < 0 ? row.canForward : row.canBack
+                swipeMode = sideways && !rowCanMove ? .tabs : .pass
+            }
+            if swipeMode != .pass, !swipeDone, abs(swipeDX) > 40, sideways {
                 swipeDone = true
-                // Where the fingers went, whatever the "natural scrolling" setting: left → next tab.
-                let finger = event.isDirectionInvertedFromDevice ? swipeDX : -swipeDX
                 model.selectAdjacentTab(finger < 0 ? 1 : -1)
             }
-            return swipeDone
         }
+        if swipeMode == .pass { return event }
+        // Over a row the scroll view still gets the gesture's phases (so it never sticks mid-bounce),
+        // just without movement, until it's clear the swipe is meant for it.
+        if swipeRow != nil { return Self.withoutMovement(event) }
         // Momentum after a tab switch shouldn't scroll whatever is under the pointer.
-        return swipeDone
+        return swipeDone ? nil : event
     }
 
-    /// The pointer is over a row that can itself scroll sideways (apps, shelf, colours).
-    private func scrollsSideways(at point: NSPoint) -> Bool {
+    /// The row under the pointer that can itself scroll sideways (apps, shelf, clipboard, colours).
+    private func sidewaysRow(at point: NSPoint) -> (canBack: Bool, canForward: Bool)? {
         var view = panel.contentView?.hitTest(point)
         while let v = view {
-            if let sv = v as? NSScrollView, let doc = sv.documentView, doc.frame.width > sv.contentSize.width + 1 { return true }
+            if let sv = v as? NSScrollView, let doc = sv.documentView {
+                let maxX = doc.frame.width - sv.contentView.bounds.width
+                if maxX > 1 {
+                    let x = sv.contentView.bounds.origin.x
+                    return (canBack: x > 1, canForward: x < maxX - 1)
+                }
+            }
             view = v.superview
         }
-        return false
+        return nil
+    }
+
+    private static func withoutMovement(_ event: NSEvent) -> NSEvent? {
+        guard let cg = event.cgEvent?.copy() else { return nil }
+        for field: CGEventField in [.scrollWheelEventDeltaAxis1, .scrollWheelEventDeltaAxis2,
+                                    .scrollWheelEventPointDeltaAxis1, .scrollWheelEventPointDeltaAxis2] {
+            cg.setIntegerValueField(field, value: 0)
+        }
+        cg.setDoubleValueField(.scrollWheelEventFixedPtDeltaAxis1, value: 0)
+        cg.setDoubleValueField(.scrollWheelEventFixedPtDeltaAxis2, value: 0)
+        return NSEvent(cgEvent: cg)
     }
 
     private var panel: IslandPanel!
@@ -198,10 +230,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             MainActor.assumeIsolated { self?.trackMouse() }
             return event
         }
-        // Two-finger horizontal swipe on the open island switches tabs (a row that scrolls sideways keeps it).
+        // Two-finger horizontal swipe on the open island switches tabs (a sideways row keeps it until it hits its end).
         NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self] event in
-            let consumed = MainActor.assumeIsolated { self?.handleSwipe(event) ?? false }
-            return consumed ? nil : event
+            // NSEvent isn't Sendable; the monitor already runs on the main thread.
+            nonisolated(unsafe) let incoming = event
+            nonisolated(unsafe) var outgoing: NSEvent? = incoming
+            MainActor.assumeIsolated { outgoing = self?.handleSwipe(incoming) ?? incoming }
+            return outgoing
         }
         model.onDragOutEnded = { [weak self] in self?.trackMouse() }
         stateObserver = model.objectWillChange.sink { [weak self] in
