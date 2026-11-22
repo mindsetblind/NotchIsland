@@ -1,6 +1,7 @@
 import AppKit
 import CryptoKit
 import Network
+import NotchIslandCore
 import Security
 
 // MARK: - Data
@@ -44,6 +45,9 @@ enum SpotifyError: LocalizedError {
 
 // MARK: - Web API client (OAuth PKCE, no client secret)
 
+/// Main-actor isolated: the tokens are read and written by many requests at once, and only one
+/// refresh may be in flight (see `SharedRefresh`). Network waits don't block the main thread.
+@MainActor
 final class SpotifyWeb {
     static let port: UInt16 = 8973
     static let redirectURI = "http://127.0.0.1:\(port)/callback"
@@ -69,6 +73,7 @@ final class SpotifyWeb {
 
     private var accessToken: String?
     private var expiresAt = Date.distantPast
+    private let refresh = SharedRefresh<String>()
     private var server: CallbackServer?
     /// Set from a 429 answer's Retry-After: no requests until then.
     private var rateLimitedUntil = Date.distantPast
@@ -164,6 +169,7 @@ final class SpotifyWeb {
     }
 
     private func requestToken(_ form: [String: String]) async throws {
+        let sentRefreshToken = form["grant_type"] == "refresh_token" ? form["refresh_token"] : nil
         guard let tokenURL = URL(string: "https://accounts.spotify.com/api/token") else { throw SpotifyError.badResponse }
         var req = URLRequest(url: tokenURL)
         req.httpMethod = "POST"
@@ -174,8 +180,10 @@ final class SpotifyWeb {
 
         let (data, status) = try await perform(req)
         if status == 400 || status == 401 {
-            // Refresh token revoked or expired: force a fresh login.
-            logout()
+            guard let sentRefreshToken else { throw SpotifyError.http(status) }   // a bad login code
+            // Refresh token revoked or expired: force a fresh login — but only if it is still the one
+            // we hold. If it was replaced meanwhile (a new login), the stored one is fine.
+            if Keychain.refreshToken == sentRefreshToken { logout() }
             throw SpotifyError.notLoggedIn
         }
         guard status == 200,
@@ -187,13 +195,19 @@ final class SpotifyWeb {
         if let scope = json["scope"] as? String { UserDefaults.standard.set(scope, forKey: Self.grantedScopesKey) }
     }
 
-    private func validToken(forceRefresh: Bool = false) async throws -> String {
-        if !forceRefresh, let accessToken, Date() < expiresAt { return accessToken }
-        guard let clientID else { throw SpotifyError.noClientID }
-        guard let refresh = Keychain.refreshToken else { throw SpotifyError.notLoggedIn }
-        try await requestToken(["grant_type": "refresh_token", "refresh_token": refresh, "client_id": clientID])
-        guard let accessToken else { throw SpotifyError.notLoggedIn }
-        return accessToken
+    /// A usable access token. `rejected` is a token the API just answered 401 to: refresh only if it is
+    /// still the current one — another request may already have replaced it.
+    private func validToken(rejected: String? = nil) async throws -> String {
+        if let accessToken, Date() < expiresAt, accessToken != rejected { return accessToken }
+        // Spotify rotates refresh tokens: two refreshes at once would send the same one, and the
+        // second would be rejected. All callers share a single refresh instead.
+        return try await refresh.run { [self] in
+            guard let clientID else { throw SpotifyError.noClientID }
+            guard let refreshToken = Keychain.refreshToken else { throw SpotifyError.notLoggedIn }
+            try await requestToken(["grant_type": "refresh_token", "refresh_token": refreshToken, "client_id": clientID])
+            guard let accessToken else { throw SpotifyError.notLoggedIn }
+            return accessToken
+        }
     }
 
     /// GET a Web API URL. Returns nil for 204 No Content.
@@ -202,10 +216,11 @@ final class SpotifyWeb {
         guard let url = URL(string: urlString.hasPrefix("http") ? urlString : Self.api + urlString),
               url.scheme == "https", url.host == "api.spotify.com" else { throw SpotifyError.badResponse }
         var req = URLRequest(url: url)
-        req.setValue("Bearer \(try await validToken())", forHTTPHeaderField: "Authorization")
+        let token = try await validToken()
+        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         let (data, status) = try await perform(req)
         if status == 401 && retry {
-            _ = try await validToken(forceRefresh: true)
+            _ = try await validToken(rejected: token)
             return try await get(urlString, retry: false)
         }
         if status == 204 { return nil }
@@ -354,12 +369,13 @@ final class SpotifyWeb {
         guard let url = URL(string: Self.api + path) else { throw SpotifyError.badResponse }
         var req = URLRequest(url: url)
         req.httpMethod = method
-        req.setValue("Bearer \(try await validToken())", forHTTPHeaderField: "Authorization")
+        let token = try await validToken()
+        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.httpBody = try JSONSerialization.data(withJSONObject: body)
         let (data, status) = try await perform(req)
         if status == 401 && retry {
-            _ = try await validToken(forceRefresh: true)
+            _ = try await validToken(rejected: token)
             return try await send(method, path, body: body, retry: false)
         }
         let reason = ((try? JSONSerialization.jsonObject(with: data)) as? [String: Any])
