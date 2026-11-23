@@ -45,6 +45,7 @@ struct NotificationSound: Identifiable, Hashable {
         guard let sound = Self.sound(id) else { return }
         Self.playing?.stop()
         Self.playing = sound
+        sound.volume = Float(min(max(AppSettings.shared.agentSoundVolume, 0), 1))
         sound.play()
     }
 

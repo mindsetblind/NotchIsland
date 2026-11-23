@@ -449,10 +449,12 @@ private struct ClaudeSettings: View {
                     .disabled(!settings.claudeSounds)
                 SoundPicker(title: "Агент просит разрешение", selection: $settings.agentAskSound)
                     .disabled(!settings.claudeSounds)
+                SoundVolumeSlider(volume: $settings.agentSoundVolume, preview: settings.agentDoneSound)
+                    .disabled(!settings.claudeSounds)
             } header: {
                 Text("Звуки")
             } footer: {
-                Text("«Перезвон», «Колокольчик», «Капля» и «Аккорд» — собственные звуки NotchIsland. Звук играет при выборе, кнопка ▶︎ повторяет его.")
+                Text("«Перезвон», «Колокольчик», «Капля» и «Аккорд» — собственные звуки NotchIsland. Звук играет при выборе, кнопка ▶︎ повторяет его. Громкость — доля от общей громкости Mac.")
                     .font(.caption).foregroundStyle(.secondary)
             }
         }
@@ -483,6 +485,30 @@ struct SoundPicker: View {
                 .disabled(selection == NotificationSound.none.id)
                 .help("Прослушать")
                 .accessibilityLabel("Прослушать «\(NotificationSound.named(selection).title)»")
+        }
+    }
+}
+
+/// Loudness of the agent sounds; plays the chosen sound when the knob is let go.
+private struct SoundVolumeSlider: View {
+    @Binding var volume: Double
+    let preview: String
+
+    var body: some View {
+        LabeledContent("Громкость") {
+            HStack(spacing: 8) {
+                Image(systemName: "speaker.fill").foregroundStyle(.secondary)
+                Slider(value: $volume, in: 0.05...1) { editing in
+                    if !editing { NotificationSound.named(preview).play() }
+                }
+                .frame(maxWidth: 220)
+                .accessibilityLabel("Громкость звуков агентов")
+                .accessibilityValue("\(Int((volume * 100).rounded())) процентов")
+                Image(systemName: "speaker.wave.3.fill").foregroundStyle(.secondary)
+                Text("\(Int((volume * 100).rounded()))%")
+                    .monospacedDigit().foregroundStyle(.secondary)
+                    .frame(width: 40, alignment: .trailing)
+            }
         }
     }
 }
