@@ -124,7 +124,7 @@ final class AppSettings: ObservableObject {
         cleaningDuration = d.object(forKey: "cleaningDuration") as? Double ?? 120
         claudePermissionsInIsland = bool("claudePermissionsInIsland", true)
         claudeSounds = bool("claudeSounds", true)
-        agentDoneSound = d.string(forKey: "agentDoneSound") ?? "chime.bell"
+        agentDoneSound = d.string(forKey: "agentDoneSound") ?? "chime.ring"
         agentAskSound = d.string(forKey: "agentAskSound") ?? "system.Tink"
         petAlwaysVisible = bool("mascotAlwaysVisible", true)
         petSleepsAtNight = bool("mascotSleepsAtNight", true)

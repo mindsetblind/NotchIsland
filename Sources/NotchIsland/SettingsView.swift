@@ -452,7 +452,7 @@ private struct ClaudeSettings: View {
             } header: {
                 Text("Звуки")
             } footer: {
-                Text("«Колокольчик», «Капля» и «Аккорд» — собственные мягкие звуки NotchIsland. Звук играет при выборе, кнопка ▶︎ повторяет его.")
+                Text("«Перезвон», «Колокольчик», «Капля» и «Аккорд» — собственные звуки NotchIsland. Звук играет при выборе, кнопка ▶︎ повторяет его.")
                     .font(.caption).foregroundStyle(.secondary)
             }
         }

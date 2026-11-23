@@ -29,6 +29,7 @@ struct NotificationSound: Identifiable, Hashable {
 
     private static func title(_ chime: Chime) -> String {
         switch chime {
+        case .ring:  "Перезвон"
         case .bell:  "Колокольчик"
         case .drop:  "Капля"
         case .chord: "Аккорд"

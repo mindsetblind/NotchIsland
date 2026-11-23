@@ -1,7 +1,9 @@
 import Foundation
 
-/// NotchIsland's own notification sounds, synthesized as soft bell tones (no audio files in the bundle).
+/// NotchIsland's own notification sounds, synthesized as bell tones (no audio files in the bundle).
 public enum Chime: String, CaseIterable, Sendable {
+    /// A quick bright run of four notes up (E major): clearly heard from across the room.
+    case ring
     /// Two notes going up a fifth: "done".
     case bell
     /// One short, round note.
@@ -16,6 +18,8 @@ public enum Chime: String, CaseIterable, Sendable {
 
     var notes: [Note] {
         switch self {
+        case .ring:  [Note(frequency: 1318.5, delay: 0), Note(frequency: 1661.2, delay: 0.065),
+                      Note(frequency: 1975.5, delay: 0.13), Note(frequency: 2637.0, delay: 0.195)]             // E6 G#6 B6 E7
         case .bell:  [Note(frequency: 1318.5, delay: 0), Note(frequency: 1975.5, delay: 0.12)]          // E6, B6
         case .drop:  [Note(frequency: 1046.5, delay: 0)]                                                // C6
         case .chord: [Note(frequency: 1046.5, delay: 0), Note(frequency: 1318.5, delay: 0.09),
@@ -24,17 +28,31 @@ public enum Chime: String, CaseIterable, Sendable {
     }
 
     /// How fast a note fades (seconds until it is ~37% as loud).
-    var decay: Double { self == .drop ? 0.18 : 0.32 }
+    var decay: Double {
+        switch self {
+        case .drop: 0.18
+        case .ring: 0.26
+        default:    0.32
+        }
+    }
+
+    /// Overtones: a bell's fundamental, octave and inharmonic shimmer; brighter and louder for `ring`.
+    var partials: [(ratio: Double, gain: Double, decay: Double)] {
+        self == .ring
+            ? [(1, 1, 1), (2, 0.5, 0.7), (3, 0.18, 0.5), (2.76, 0.14, 0.4)]
+            : [(1, 1, 1), (2, 0.28, 0.6), (2.76, 0.08, 0.4)]
+    }
+
+    /// Peak level as a share of full scale.
+    var level: Double { self == .ring ? 0.75 : 0.5 }
 
     public static let sampleRate = 44_100
 
-    /// Mono 16-bit samples, peak at about half of full scale so it never sounds harsh.
+    /// Mono 16-bit samples, peaking at `level` (below full scale, so it never clips).
     public func samples() -> [Int16] {
         let rate = Double(Self.sampleRate)
         let length = (notes.map(\.delay).max() ?? 0) + decay * 6
         var mix = [Double](repeating: 0, count: Int(length * rate))
-        // A bell: fundamental, a soft octave and a quiet inharmonic partial for shimmer.
-        let partials: [(ratio: Double, gain: Double, decay: Double)] = [(1, 1, 1), (2, 0.28, 0.6), (2.76, 0.08, 0.4)]
         for note in notes {
             let start = Int(note.delay * rate)
             for i in 0..<(mix.count - start) {
@@ -48,7 +66,7 @@ public enum Chime: String, CaseIterable, Sendable {
             }
         }
         let peak = mix.map(abs).max() ?? 1
-        let scale = peak > 0 ? 0.5 / peak : 0
+        let scale = peak > 0 ? level / peak : 0
         return mix.map { Int16(($0 * scale * Double(Int16.max)).rounded()) }
     }
 
