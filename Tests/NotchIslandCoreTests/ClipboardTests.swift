@@ -29,7 +29,7 @@ struct SecretDetectorTests {
         "96d2e5b7c1a04f3e9b2d8c6a5f4e3d2c1b0a9f8e",
         "activityCoordinatorDidChange",
         "swift build -c release",
-        "ivan@example.com",
+        "user@example.com",
         "The password field must be at least 8 characters long.",
         "let x = 42",
         "ScreenshotFinal2024.png",

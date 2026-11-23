@@ -63,9 +63,9 @@ final class ClaudeMonitor: ObservableObject {
         sessions = [
             ClaudeSession(id: "a", cwd: "/Users/me/myMacUtilities/NotchIsland", status: .working,
                           activity: "Правит Views.swift  +12 −3", updatedAt: Date().addingTimeInterval(-20)),
-            ClaudeSession(id: "b", cwd: "/Users/me/UNI/Java practice", status: .waiting,
+            ClaudeSession(id: "b", cwd: "/Users/me/Projects/Weather app", status: .waiting,
                           activity: "Ждёт твоего ответа", updatedAt: Date().addingTimeInterval(-95)),
-            ClaudeSession(id: "c", cwd: "/Users/me/Fit_app", status: .done,
+            ClaudeSession(id: "c", cwd: "/Users/me/Projects/Notes", status: .done,
                           activity: "Готово", updatedAt: Date().addingTimeInterval(-600)),
         ]
         permissions = [PermissionAsk(sessionID: "a", project: "NotchIsland", toolName: "Bash", title: "Запустить команду",

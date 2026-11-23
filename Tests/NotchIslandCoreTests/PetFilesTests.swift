@@ -21,6 +21,39 @@ struct PetPolicyTests {
         #expect(policy.resolve("/Users/me/code/.git/config") == nil)
         #expect(policy.resolve("/Users/me/Documents/Library/x") != nil)   // only the top-level Library
     }
+
+    /// APFS ignores case: ~/library is ~/Library.
+    @Test func libraryInAnyCase() {
+        #expect(policy.resolve("~/library/Keychains/x") == nil)
+        #expect(policy.resolve("/Users/me/LIBRARY/x") == nil)
+    }
+
+    /// A symlink inside the home folder used to lead the pet anywhere it pointed.
+    @Test func symlinksCantLeadOutside() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent("petpolicy-\(UUID().uuidString)")
+        let home = root.appendingPathComponent("home"), outside = root.appendingPathComponent("outside")
+        try fm.createDirectory(at: home.appendingPathComponent("Desktop"), withIntermediateDirectories: true)
+        try fm.createDirectory(at: outside, withIntermediateDirectories: true)
+        try fm.createDirectory(at: home.appendingPathComponent("Library"), withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: root) }
+        try fm.createSymbolicLink(at: home.appendingPathComponent("escape"), withDestinationURL: outside)
+        try fm.createSymbolicLink(at: home.appendingPathComponent("lib"), withDestinationURL: home.appendingPathComponent("Library"))
+        try fm.createSymbolicLink(at: home.appendingPathComponent("docs"), withDestinationURL: home.appendingPathComponent("Desktop"))
+        try fm.createSymbolicLink(at: home.appendingPathComponent("gone"), withDestinationURL: root.appendingPathComponent("nowhere"))
+
+        let policy = PetPolicy(home: home)
+        #expect(policy.resolve("~/escape/secret.txt") == nil)          // leads outside home
+        #expect(policy.resolve("~/escape") == nil)
+        #expect(policy.resolve("~/lib/Preferences/x.plist") == nil)    // leads into ~/Library
+        #expect(policy.resolve("~/gone/x") == nil)                     // dangling: can't tell where
+        // A link that stays inside is fine and resolves to the real place.
+        let real = try #require(policy.resolve("~/docs/new-folder"))
+        #expect(real.path == policy.home.appendingPathComponent("Desktop/new-folder").path)
+        // Ordinary paths, existing or not yet created, still work.
+        #expect(policy.resolve("~/Desktop/a.png") != nil)
+        #expect(policy.resolve("~/Desktop/sub/new.txt") != nil)
+    }
 }
 
 struct PetValidatorTests {

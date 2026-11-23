@@ -129,17 +129,41 @@ public struct PetPolicy: Sendable {
     }
 
     /// Absolute path inside the home folder (`~` expanded), or nil when it's off limits.
+    /// Symlinks in the part of the path that already exists are followed, and the real path must be
+    /// allowed too — a link inside the home folder can't lead the pet outside of it.
     public func resolve(_ raw: String) -> URL? {
         var path = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         if path.hasPrefix("~") { path = home.path + path.dropFirst() }
         guard path.hasPrefix("/") else { return nil }
         let url = URL(fileURLWithPath: path).standardizedFileURL
+        guard allowed(url), let real = Self.followingSymlinks(url), allowed(real) else { return nil }
+        return real
+    }
+
+    private func allowed(_ url: URL) -> Bool {
         let parts = url.pathComponents, base = home.pathComponents
-        guard parts.count > base.count, Array(parts.prefix(base.count)) == base else { return nil }
+        guard parts.count > base.count, Array(parts.prefix(base.count)) == base else { return false }
         let inside = parts.dropFirst(base.count)
-        if inside.first == "Library" { return nil }
-        if inside.contains(where: { $0.hasPrefix(".") }) { return nil }
-        return url
+        // APFS ignores case by default: ~/library is the same folder as ~/Library.
+        if inside.first?.lowercased() == "library" { return false }
+        if inside.contains(where: { $0.hasPrefix(".") }) { return false }
+        return true
+    }
+
+    /// `url` with symlinks resolved in its longest existing prefix; the rest (not created yet) is kept.
+    /// nil for a dangling symlink — where it points can't be checked.
+    static func followingSymlinks(_ url: URL) -> URL? {
+        let fm = FileManager.default
+        var existing = url, rest: [String] = []
+        // attributesOfItem doesn't follow links, so a dangling link still counts as "there".
+        while existing.path != "/", (try? fm.attributesOfItem(atPath: existing.path)) == nil {
+            rest.insert(existing.lastPathComponent, at: 0)
+            existing = existing.deletingLastPathComponent()
+        }
+        var real = existing.resolvingSymlinksInPath()
+        if (try? fm.destinationOfSymbolicLink(atPath: real.path)) != nil { return nil }   // still a link: dangling
+        for part in rest { real.appendPathComponent(part) }
+        return real.standardizedFileURL
     }
 }
 
