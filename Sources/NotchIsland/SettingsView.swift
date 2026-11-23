@@ -3,6 +3,7 @@ import NotchIslandCore
 import SwiftUI
 
 /// Regular titled window hosting the settings (the island itself can't take keyboard input).
+/// Laid out like System Settings: a sidebar of sections with colored icons, the section on the right.
 final class SettingsWindow {
     static let shared = SettingsWindow()
     private var window: NSWindow?
@@ -11,10 +12,15 @@ final class SettingsWindow {
         if window == nil {
             let w = EditableWindow(contentViewController: NSHostingController(rootView: SettingsView(model: model)))
             w.title = "Настройки NotchIsland"
-            w.styleMask = [.titled, .closable, .miniaturizable]
+            w.styleMask = [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView]
+            w.titlebarAppearsTransparent = true
+            w.titleVisibility = .hidden
+            w.toolbarStyle = .unified
             w.isReleasedWhenClosed = false
-            w.setContentSize(NSSize(width: 640, height: 500))
-            w.center()
+            w.setContentSize(NSSize(width: 820, height: 600))
+            w.contentMinSize = NSSize(width: 700, height: 460)
+            w.setFrameAutosaveName("NotchIslandSettings")
+            if !w.setFrameUsingName("NotchIslandSettings") { w.center() }
             window = w
         }
         NSApp.activate(ignoringOtherApps: true)
@@ -29,25 +35,140 @@ final class EditableWindow: NSWindow {
     }
 }
 
-struct SettingsView: View {
-    @ObservedObject var model: IslandModel
+/// Sections of the Settings window, in sidebar order.
+enum SettingsPane: String, CaseIterable, Identifiable {
+    case general, peeks, pet, music, clipboard, tools, agents, developer, portal, home, usage, about
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .general:   "Основные"
+        case .peeks:     "Уведомления"
+        case .pet:       "Pet"
+        case .music:     "Музыка"
+        case .clipboard: "Буфер обмена"
+        case .tools:     "Инструменты"
+        case .agents:    "Агенты"
+        case .developer: "Разработка"
+        case .portal:    "Portal"
+        case .home:      "Дом"
+        case .usage:     "Статистика"
+        case .about:     "О программе"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .general:   "gearshape.fill"
+        case .peeks:     "bell.badge.fill"
+        case .pet:       "pawprint.fill"
+        case .music:     "music.note"
+        case .clipboard: "doc.on.clipboard.fill"
+        case .tools:     "wrench.and.screwdriver.fill"
+        case .agents:    "eyes"
+        case .developer: "hammer.fill"
+        case .portal:    "sparkles"
+        case .home:      "house.fill"
+        case .usage:     "chart.bar.fill"
+        case .about:     "info.circle.fill"
+        }
+    }
+
+    var tint: Color {
+        switch self {
+        case .general:   .gray
+        case .peeks:     .red
+        case .pet:       .orange
+        case .music:     .pink
+        case .clipboard: .blue
+        case .tools:     .brown
+        case .agents:    .purple
+        case .developer: .indigo
+        case .portal:    .teal
+        case .home:      .yellow
+        case .usage:     .green
+        case .about:     .gray
+        }
+    }
+
+    /// Sidebar groups, separated by a gap like in System Settings.
+    static let groups: [[SettingsPane]] = [
+        [.general, .peeks],
+        [.pet, .music, .clipboard, .tools],
+        [.agents, .developer, .portal, .home],
+        [.usage, .about],
+    ]
+}
+
+/// The rounded colored square with a white symbol, as in System Settings.
+struct SettingsIcon: View {
+    let pane: SettingsPane
+    var size: CGFloat = 22
 
     var body: some View {
-        TabView {
-            GeneralSettings().tabItem { Label("Основные", systemImage: "gearshape") }
-            PetSettings().tabItem { Label("Pet", systemImage: "pawprint") }
-            PeekSettings(calendar: model.calendar).tabItem { Label("Уведомления", systemImage: "bell.badge") }
-            MusicSettings(model: model).tabItem { Label("Музыка", systemImage: "music.note") }
-            ClipboardSettings(history: model.clipboard).tabItem { Label("Буфер", systemImage: "doc.on.clipboard") }
-            ClaudeSettings().tabItem { Label("Агенты", systemImage: "eyes") }
-            DeveloperSettings().tabItem { Label("Разработка", systemImage: "hammer") }
-            ToolSettings(model: model).tabItem { Label("Инструменты", systemImage: "wrench.and.screwdriver") }
-            HomeSettings(home: SmartHomeController.shared).tabItem { Label("Дом", systemImage: "house") }
-            PortalSettings(portal: PortalService.shared).tabItem { Label("Portal", systemImage: "sparkles") }
-            UsageSettings().tabItem { Label("Статистика", systemImage: "chart.bar") }
-            AboutSettings().tabItem { Label("О программе", systemImage: "info.circle") }
+        RoundedRectangle(cornerRadius: size * 0.27, style: .continuous)
+            .fill(pane.tint.gradient)
+            .frame(width: size, height: size)
+            .overlay(Image(systemName: pane.icon)
+                .font(.system(size: size * 0.52, weight: .semibold))
+                .foregroundStyle(.white))
+            .shadow(color: .black.opacity(0.12), radius: 0.5, y: 0.5)
+    }
+}
+
+struct SettingsView: View {
+    @ObservedObject var model: IslandModel
+    @AppStorage("settingsPane") private var pane: SettingsPane = .general
+
+    var body: some View {
+        NavigationSplitView {
+            List(selection: Binding(get: { pane }, set: { if let p = $0 { pane = p } })) {
+                ForEach(Array(SettingsPane.groups.enumerated()), id: \.offset) { _, group in
+                    Section {
+                        ForEach(group) { p in
+                            Label { Text(p.title) } icon: { SettingsIcon(pane: p) }
+                                .tag(p)
+                        }
+                    }
+                }
+            }
+            .listStyle(.sidebar)
+            .frame(minWidth: 215)
+            .navigationSplitViewColumnWidth(215)
+            .toolbar(removing: .sidebarToggle)
+        } detail: {
+            VStack(spacing: 0) {
+                HStack(spacing: 10) {
+                    SettingsIcon(pane: pane, size: 28)
+                    Text(pane.title).font(.title2.weight(.semibold))
+                    Spacer()
+                }
+                .padding(.horizontal, 28)
+                .padding(.top, 22)
+                .padding(.bottom, 2)
+                detail(pane)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+            .id(pane)
         }
-        .frame(width: 640, height: 500)
+        .frame(minWidth: 700, minHeight: 460)
+    }
+
+    @ViewBuilder private func detail(_ pane: SettingsPane) -> some View {
+        switch pane {
+        case .general:   GeneralSettings()
+        case .peeks:     PeekSettings(calendar: model.calendar)
+        case .pet:       PetSettings()
+        case .music:     MusicSettings(model: model)
+        case .clipboard: ClipboardSettings(history: model.clipboard)
+        case .tools:     ToolSettings(model: model)
+        case .agents:    ClaudeSettings()
+        case .developer: DeveloperSettings()
+        case .portal:    PortalSettings(portal: PortalService.shared)
+        case .home:      HomeSettings(home: SmartHomeController.shared)
+        case .usage:     UsageSettings()
+        case .about:     AboutSettings()
+        }
     }
 }
 
@@ -318,13 +439,51 @@ private struct ClaudeSettings: View {
             ForEach(CodingAgent.allCases) { AgentHookSection(agent: $0) }
             Section {
                 Toggle("Спрашивать разрешения в острове", isOn: $settings.claudePermissionsInIsland)
-                Toggle("Звуки (запрос разрешения, готово)", isOn: $settings.claudeSounds)
             } footer: {
                 Text("Если выключить разрешения, агент будет спрашивать их у себя, а остров — только показывать статус.")
                     .font(.caption).foregroundStyle(.secondary)
             }
+            Section {
+                Toggle("Звуки агентов", isOn: $settings.claudeSounds)
+                SoundPicker(title: "Сессия закончила работу", selection: $settings.agentDoneSound)
+                    .disabled(!settings.claudeSounds)
+                SoundPicker(title: "Агент просит разрешение", selection: $settings.agentAskSound)
+                    .disabled(!settings.claudeSounds)
+            } header: {
+                Text("Звуки")
+            } footer: {
+                Text("«Колокольчик», «Капля» и «Аккорд» — собственные мягкие звуки NotchIsland. Звук играет при выборе, кнопка ▶︎ повторяет его.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
         }
         .formStyle(.grouped)
+    }
+}
+
+/// Picks a NotificationSound and plays it on change; ▶︎ plays it again.
+struct SoundPicker: View {
+    let title: String
+    @Binding var selection: String
+
+    var body: some View {
+        HStack {
+            Picker(title, selection: $selection) {
+                Section("NotchIsland") {
+                    ForEach(NotificationSound.chimes) { Text($0.title).tag($0.id) }
+                }
+                Section("Системные") {
+                    ForEach(NotificationSound.system) { Text($0.title).tag($0.id) }
+                }
+                Divider()
+                Text(NotificationSound.none.title).tag(NotificationSound.none.id)
+            }
+            .onChange(of: selection) { _, id in NotificationSound.named(id).play() }
+            Button { NotificationSound.named(selection).play() } label: { Image(systemName: "play.fill") }
+                .buttonStyle(.borderless)
+                .disabled(selection == NotificationSound.none.id)
+                .help("Прослушать")
+                .accessibilityLabel("Прослушать «\(NotificationSound.named(selection).title)»")
+        }
     }
 }
 

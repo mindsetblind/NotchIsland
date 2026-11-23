@@ -15,7 +15,7 @@ enum Snapshots {
         active = true
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let savedTab = UserDefaults.standard.string(forKey: "selectedTab")
-        render(to: dir)
+        if args.contains("--settings") { renderSettings(to: dir) } else { render(to: dir) }
         UserDefaults.standard.set(savedTab, forKey: "selectedTab")
         exit(0)
     }
@@ -25,6 +25,26 @@ enum Snapshots {
         tracker.handle(DevEvent(kind: .progress, id: "build", message: "Compiling Views.swift", progress: 0.6))
         tracker.handle(DevEvent(kind: .start, id: "tests", title: "npm test", category: .test))
         tracker.handle(DevEvent(kind: .finish, id: "tests", message: "3 failed, 41 passed", status: .failure, exitCode: 1))
+    }
+
+    /// `open -n -W NotchIsland.app --args --snapshots <dir> --settings`: the real Settings window, one PNG per
+    /// sidebar section (launched through `open` so macOS asks for permissions as the app, not as the shell).
+    private static func renderSettings(to dir: URL) {
+        let saved = UserDefaults.standard.string(forKey: "settingsPane")
+        defer { UserDefaults.standard.set(saved, forKey: "settingsPane") }
+        let model = IslandModel()
+        _ = NSApplication.shared
+        SettingsWindow.shared.show(model: model)
+        func pump(_ s: Double) { RunLoop.main.run(until: Date().addingTimeInterval(s)) }
+        for pane in SettingsPane.allCases {
+            UserDefaults.standard.set(pane.rawValue, forKey: "settingsPane")
+            pump(0.8)
+            guard let window = NSApp.windows.first(where: { $0 is EditableWindow }),
+                  let frame = window.contentView?.superview,
+                  let rep = frame.bitmapImageRepForCachingDisplay(in: frame.bounds) else { continue }
+            frame.cacheDisplay(in: frame.bounds, to: rep)
+            try? rep.representation(using: .png, properties: [:])?.write(to: dir.appendingPathComponent("settings-\(pane.rawValue).png"))
+        }
     }
 
     private static func render(to dir: URL) {
