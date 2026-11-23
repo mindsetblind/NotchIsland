@@ -135,7 +135,7 @@ final class ClaudeMonitor: ObservableObject {
                                     suggestions: e["permission_suggestions"] as? [Any] ?? [], connection: fd, agent: agent)
             withAnimation(IslandModel.open) { permissions.append(ask) }
             watchHangup(ask)
-            if AppSettings.shared.claudeSounds { NSSound(named: "Tink")?.play() }
+            if AppSettings.shared.claudeSounds { NotificationSound.named(AppSettings.shared.agentAskSound).play() }
             NSHapticFeedbackManager.defaultPerformer.perform(.levelChange, performanceTime: .now)
         case "Notification":
             let type = e["notification_type"] as? String ?? ""
@@ -148,7 +148,7 @@ final class ClaudeMonitor: ObservableObject {
             s.status = .done
             s.activity = "Готово"
             showPeek(AgentPeek(project: s.project, text: "готово", mood: .happy))
-            if AppSettings.shared.claudeSounds { NSSound(named: "Glass")?.play() }
+            if AppSettings.shared.claudeSounds { NotificationSound.named(AppSettings.shared.agentDoneSound).play() }
         case "SessionEnd":
             withAnimation(IslandModel.spring) { sessions.removeAll { $0.id == sid } }
             return

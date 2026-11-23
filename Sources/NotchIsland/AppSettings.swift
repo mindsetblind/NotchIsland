@@ -35,6 +35,9 @@ final class AppSettings: ObservableObject {
     @Published var cleaningDuration: TimeInterval { didSet { save(cleaningDuration, "cleaningDuration") } }
     @Published var claudePermissionsInIsland: Bool { didSet { save(claudePermissionsInIsland, "claudePermissionsInIsland") } }
     @Published var claudeSounds: Bool { didSet { save(claudeSounds, "claudeSounds") } }
+    /// NotificationSound ids for "the agent finished" and "the agent asks for permission".
+    @Published var agentDoneSound: String { didSet { save(agentDoneSound, "agentDoneSound") } }
+    @Published var agentAskSound: String { didSet { save(agentAskSound, "agentAskSound") } }
     @Published var petAlwaysVisible: Bool { didSet { save(petAlwaysVisible, "mascotAlwaysVisible") } }
     @Published var petSleepsAtNight: Bool { didSet { save(petSleepsAtNight, "mascotSleepsAtNight") } }
     /// ⌥⇧Space calls the pet out of the notch to help with files.
@@ -121,6 +124,8 @@ final class AppSettings: ObservableObject {
         cleaningDuration = d.object(forKey: "cleaningDuration") as? Double ?? 120
         claudePermissionsInIsland = bool("claudePermissionsInIsland", true)
         claudeSounds = bool("claudeSounds", true)
+        agentDoneSound = d.string(forKey: "agentDoneSound") ?? "chime.ring"
+        agentAskSound = d.string(forKey: "agentAskSound") ?? "system.Tink"
         petAlwaysVisible = bool("mascotAlwaysVisible", true)
         petSleepsAtNight = bool("mascotSleepsAtNight", true)
         petHotKeyEnabled = bool("petHotKeyEnabled", true)
