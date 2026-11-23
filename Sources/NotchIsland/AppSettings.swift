@@ -38,6 +38,8 @@ final class AppSettings: ObservableObject {
     /// NotificationSound ids for "the agent finished" and "the agent asks for permission".
     @Published var agentDoneSound: String { didSet { save(agentDoneSound, "agentDoneSound") } }
     @Published var agentAskSound: String { didSet { save(agentAskSound, "agentAskSound") } }
+    /// Loudness of the agent sounds, 0…1, on top of the Mac's own volume.
+    @Published var agentSoundVolume: Double { didSet { save(agentSoundVolume, "agentSoundVolume") } }
     @Published var petAlwaysVisible: Bool { didSet { save(petAlwaysVisible, "mascotAlwaysVisible") } }
     @Published var petSleepsAtNight: Bool { didSet { save(petSleepsAtNight, "mascotSleepsAtNight") } }
     /// ⌥⇧Space calls the pet out of the notch to help with files.
@@ -126,6 +128,7 @@ final class AppSettings: ObservableObject {
         claudeSounds = bool("claudeSounds", true)
         agentDoneSound = d.string(forKey: "agentDoneSound") ?? "chime.ring"
         agentAskSound = d.string(forKey: "agentAskSound") ?? "system.Tink"
+        agentSoundVolume = d.object(forKey: "agentSoundVolume") as? Double ?? 1
         petAlwaysVisible = bool("mascotAlwaysVisible", true)
         petSleepsAtNight = bool("mascotSleepsAtNight", true)
         petHotKeyEnabled = bool("petHotKeyEnabled", true)
