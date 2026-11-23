@@ -14,7 +14,36 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Quick look at what changed (Linux, ~10 s, no wait for a macOS runner). Only docs → the build is
+  # skipped, and a skipped job counts as passed for the required check, so the PR can be merged.
+  changes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      code: ${{ steps.diff.outputs.code }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: diff
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          # Manual runs, new branches and anything unexpected: build to be safe.
+          if [ "$EVENT" = workflow_dispatch ] || [ -z "$BASE" ] || [ "$BASE" = 0000000000000000000000000000000000000000 ] \
+             || ! files=$(git diff --name-only "$BASE...$HEAD"); then
+            echo "code=true" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          echo "$files"
+          # Docs only: Markdown anywhere, docs/ and promo/.
+          if echo "$files" | grep -qvE '(\.md$|^docs/|^promo/)'; then code=true; else code=false; fi
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+
   build-and-test:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: macos-latest
     timeout-minutes: 30
     steps:
