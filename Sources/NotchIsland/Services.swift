@@ -39,6 +39,8 @@ struct NowPlaying: Equatable {
     var artworkURL: String?
     var trackURI: String?      // "spotify:track:…" (Spotify only)
     var isShuffling = false
+    /// The player's own volume, 0…100 (not the Mac's). Nil for a browser video.
+    var volume: Int?
     var fetchedAt: Date
 
     var trackKey: String { "\(source.rawValue)|\(title)|\(artist)|\(album)" }
@@ -51,7 +53,7 @@ struct NowPlaying: Equatable {
 
     static func == (a: NowPlaying, b: NowPlaying) -> Bool {
         // Ignore small drift in position so we don't re-render every poll.
-        a.trackKey == b.trackKey && a.isPlaying == b.isPlaying && a.isShuffling == b.isShuffling && abs(a.position(at: Date()) - b.position(at: Date())) < 1.5
+        a.trackKey == b.trackKey && a.isPlaying == b.isPlaying && a.isShuffling == b.isShuffling && a.volume == b.volume && abs(a.position(at: Date()) - b.position(at: Date())) < 1.5
     }
 }
 
@@ -108,7 +110,7 @@ final class MediaService: @unchecked Sendable {
     tell application "Spotify"
         if player state is stopped then return {"stopped"}
         set t to current track
-        return {player state as string, name of t, artist of t, album of t, (duration of t) / 1000, player position, artwork url of t, id of t, shuffling}
+        return {player state as string, name of t, artist of t, album of t, (duration of t) / 1000, player position, artwork url of t, id of t, shuffling, sound volume}
     end tell
     end timeout
     """
@@ -118,7 +120,7 @@ final class MediaService: @unchecked Sendable {
     tell application "Music"
         if player state is stopped then return {"stopped"}
         set t to current track
-        return {player state as string, name of t, artist of t, album of t, duration of t, player position, "", (database ID of t) as string, shuffle enabled}
+        return {player state as string, name of t, artist of t, album of t, duration of t, player position, "", (database ID of t) as string, shuffle enabled, sound volume}
     end tell
     end timeout
     """
@@ -185,6 +187,7 @@ final class MediaService: @unchecked Sendable {
                 ? d.atIndex(8)?.stringValue.flatMap { $0.isEmpty ? nil : (source == .music ? "music:" + $0 : $0) }
                 : nil,
             isShuffling: d.numberOfItems >= 9 ? d.atIndex(9)?.booleanValue ?? false : false,
+            volume: d.numberOfItems >= 10 ? d.atIndex(10).map { Int($0.int32Value) } : nil,
             fetchedAt: Date()
         ), .ok)
     }
@@ -279,6 +282,28 @@ final class MediaService: @unchecked Sendable {
         let property = source == .spotify ? "shuffling" : "shuffle enabled"
         runAsync("tell application \"\(source.rawValue)\" to set \(property) to \(on)")
     }
+
+    /// Sets the player's own volume, 0…100. While a slider is dragged only the newest value matters,
+    /// so a value still waiting in the queue is replaced instead of piling up behind slow Apple Events.
+    func setVolume(_ volume: Int, for source: MediaSource) {
+        guard source.usesAppleScript else { return }
+        let value = min(max(volume, 0), 100)
+        volumeLock.lock()
+        let alreadyQueued = pendingVolume != nil
+        pendingVolume = (source, value)
+        volumeLock.unlock()
+        guard !alreadyQueued else { return }
+        queue.async {
+            self.volumeLock.lock()
+            let next = self.pendingVolume
+            self.pendingVolume = nil
+            self.volumeLock.unlock()
+            guard let next else { return }
+            _ = self.execute("tell application \"\(next.source.rawValue)\" to set sound volume to \(next.value)")
+        }
+    }
+    private let volumeLock = NSLock()
+    private var pendingVolume: (source: MediaSource, value: Int)?
 
     /// Jumps to `seconds` in the current track.
     func seek(_ source: MediaSource, to seconds: Double) {

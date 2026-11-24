@@ -119,6 +119,8 @@ final class IslandModel: ObservableObject {
     /// After a seek the player may still report the old position for a moment; within this window
     /// a position far from where we jumped is treated as stale.
     private var expectedPosition: (value: Double, until: Date)?
+    /// The volume we just set: the next poll may still report the old one.
+    private var expectedVolume: (value: Int, until: Date)?
     /// Everything loaded in a player right now (Spotify, Music, a video), one per player.
     private var mediaCandidates: [NowPlaying] = []
     /// Players the island can switch between (the ⇄ button shows when there are two or more).
@@ -785,6 +787,14 @@ final class IslandModel: ObservableObject {
                 expectedPosition = nil
             }
         }
+        if let expected = expectedVolume, var p = np, p.source == nowPlaying?.source {
+            if abs((p.volume ?? -10) - expected.value) <= 1 || Date() >= expected.until {   // Spotify often lands one below
+                expectedVolume = nil
+            } else {
+                p.volume = expected.value
+                np = p
+            }
+        }
         if np != nowPlaying {
             withAnimation(Self.spring) {
                 nowPlaying = np
@@ -859,6 +869,18 @@ final class IslandModel: ObservableObject {
         expectedPosition = (t, Date().addingTimeInterval(1.5))
         nowPlaying = np
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in self?.refreshMedia() }
+    }
+
+    /// Sets the player's own volume (0…100) — the volume slider in the music tab.
+    func setVolume(_ volume: Int) {
+        guard var np = nowPlaying, np.volume != nil else { return }
+        let v = min(max(volume, 0), 100)
+        guard v != np.volume else { return }
+        lastCommandAt = Date()
+        media.setVolume(v, for: np.source)
+        np.volume = v
+        expectedVolume = (v, Date().addingTimeInterval(1.5))
+        nowPlaying = np
     }
 
     // MARK: - Spotify playlist
