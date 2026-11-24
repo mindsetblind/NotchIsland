@@ -444,63 +444,71 @@ private struct EmptyTab: View {
 
 struct MediaPanel: View {
     @ObservedObject var model: IslandModel
+    /// The cover beside the title: small enough to leave a full-width row for the controls below.
+    static let coverSize: CGFloat = 56
 
     var body: some View {
         if let np = model.nowPlaying {
-            HStack(spacing: 16) {
-                ArtworkView(image: model.artwork, size: IslandModel.artworkSize, corner: 10)
+            // Two rows: the track (small cover, title, position) on top, the controls across the whole
+            // width beneath — so play/pause sits on the island's centre line, the same as the tab icons.
+            VStack(spacing: 0) {
+                HStack(spacing: 12) {
+                    ArtworkView(image: model.artwork, size: Self.coverSize, corner: 8)
 
-                // Title with the artist small beneath, a hairline with the position, then the controls.
-                VStack(alignment: .leading, spacing: 0) {
-                    HStack(alignment: .top, spacing: 8) {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(np.title).font(.system(size: 14)).lineLimit(1)
-                            Text(np.artist).font(.system(size: 11)).foregroundStyle(.white.opacity(0.45)).lineLimit(1)
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        if let other = model.mediaSources.first(where: { $0 != np.source }) {
-                            SourceSwitchButton(target: other) { model.switchMediaSource() }
-                                .transition(.opacity)
-                        }
-                    }
-                    Spacer(minLength: 0)
-                    ProgressRow(np: np) { model.seek(to: $0) }
-                    Spacer(minLength: 0)
-                    HStack(spacing: 6) {
-                        MacMediaButton(systemName: "backward.fill", size: 15) { model.perform(.previous) }
-                            .accessibilityLabel("Предыдущий трек")
-                        MacMediaButton(systemName: np.isPlaying ? "pause.fill" : "play.fill", size: 21) { model.perform(.playPause) }
-                            .accessibilityLabel(np.isPlaying ? "Пауза" : "Воспроизвести")
-                        MacMediaButton(systemName: "forward.fill", size: 15) { model.perform(.next) }
-                            .accessibilityLabel("Следующий трек")
-                    }
-                    .frame(maxWidth: .infinity)
-                    .overlay(alignment: .leading) {
-                        if np.source == .youtube {
-                            // A video: no shuffle — just say where it plays.
-                            Image(systemName: "play.rectangle.fill")
-                                .font(.system(size: 11))
-                                .foregroundStyle(.white.opacity(0.45))
-                                .padding(.leading, 6)
-                                .help("Видео в браузере")
-                        } else {
-                            MacMediaButton(systemName: "shuffle", size: 11, isOn: np.isShuffling, secondary: true) { model.toggleShuffle() }
-                                .help(np.isShuffling ? "Перемешивание включено" : "Перемешивание выключено")
-                                .accessibilityLabel(np.isShuffling ? "Перемешивание включено" : "Перемешивание выключено")
-                        }
-                    }
-                    .overlay(alignment: .trailing) {
-                        HStack(spacing: 2) {
-                            SpeakerButton(model: model, size: 11, macStyle: true)
-                            if np.source != .youtube {
-                                MacMediaButton(systemName: "list.bullet", size: 11, isOn: model.showPlaylist, secondary: true) { model.togglePlaylist() }
-                                    .help("Плейлист")
-                                    .accessibilityLabel("Плейлист")
+                    VStack(alignment: .leading, spacing: 0) {
+                        HStack(alignment: .top, spacing: 8) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(np.title).font(.system(size: 14)).lineLimit(1)
+                                Text(np.artist).font(.system(size: 11)).foregroundStyle(.white.opacity(0.45)).lineLimit(1)
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            if let other = model.mediaSources.first(where: { $0 != np.source }) {
+                                SourceSwitchButton(target: other) { model.switchMediaSource() }
+                                    .transition(.opacity)
                             }
                         }
+                        Spacer(minLength: 0)
+                        ProgressRow(np: np) { model.seek(to: $0) }
                     }
-                    .padding(.bottom, -4) // optical: buttons carry hit padding below the glyph
+                    .frame(height: Self.coverSize)
                 }
+
+                Spacer(minLength: 0)
+
+                HStack(spacing: 6) {
+                    MacMediaButton(systemName: "backward.fill", size: 15) { model.perform(.previous) }
+                        .accessibilityLabel("Предыдущий трек")
+                    MacMediaButton(systemName: np.isPlaying ? "pause.fill" : "play.fill", size: 21) { model.perform(.playPause) }
+                        .accessibilityLabel(np.isPlaying ? "Пауза" : "Воспроизвести")
+                    MacMediaButton(systemName: "forward.fill", size: 15) { model.perform(.next) }
+                        .accessibilityLabel("Следующий трек")
+                }
+                .frame(maxWidth: .infinity)
+                .overlay(alignment: .leading) {
+                    if np.source == .youtube {
+                        // A video: no shuffle — just say where it plays.
+                        Image(systemName: "play.rectangle.fill")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.white.opacity(0.45))
+                            .padding(.leading, 6)
+                            .help("Видео в браузере")
+                    } else {
+                        MacMediaButton(systemName: "shuffle", size: 11, isOn: np.isShuffling, secondary: true) { model.toggleShuffle() }
+                            .help(np.isShuffling ? "Перемешивание включено" : "Перемешивание выключено")
+                            .accessibilityLabel(np.isShuffling ? "Перемешивание включено" : "Перемешивание выключено")
+                    }
+                }
+                .overlay(alignment: .trailing) {
+                    HStack(spacing: 2) {
+                        SpeakerButton(model: model, size: 11, macStyle: true)
+                        if np.source != .youtube {
+                            MacMediaButton(systemName: "list.bullet", size: 11, isOn: model.showPlaylist, secondary: true) { model.togglePlaylist() }
+                                .help("Плейлист")
+                                .accessibilityLabel("Плейлист")
+                        }
+                    }
+                }
+                .padding(.bottom, -4) // optical: buttons carry hit padding below the glyph
             }
         } else {
             HStack(spacing: 14) {
