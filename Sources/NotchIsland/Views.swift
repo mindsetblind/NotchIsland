@@ -444,6 +444,9 @@ private struct EmptyTab: View {
 
 struct MediaPanel: View {
     @ObservedObject var model: IslandModel
+    /// The volume slider takes the progress bar's place until you leave it alone for a few seconds.
+    @State private var showVolume = false
+    @State private var volumeTouch = 0
 
     var body: some View {
         if let np = model.nowPlaying {
@@ -464,7 +467,17 @@ struct MediaPanel: View {
                         }
                     }
                     Spacer(minLength: 0)
-                    ProgressRow(np: np) { model.seek(to: $0) }
+                    if showVolume, let volume = np.volume {
+                        VolumeRow(volume: volume, onChange: { model.setVolume($0); volumeTouch += 1 })
+                            .transition(.opacity)
+                            .task(id: volumeTouch) {
+                                try? await Task.sleep(for: .seconds(4))
+                                if !Task.isCancelled { withAnimation(.easeOut(duration: 0.2)) { showVolume = false } }
+                            }
+                    } else {
+                        ProgressRow(np: np) { model.seek(to: $0) }
+                            .transition(.opacity)
+                    }
                     Spacer(minLength: 0)
                     HStack(spacing: 6) {
                         MacMediaButton(systemName: "backward.fill", size: 15) { model.perform(.previous) }
@@ -491,6 +504,14 @@ struct MediaPanel: View {
                     }
                     .overlay(alignment: .trailing) {
                         HStack(spacing: 2) {
+                            if let volume = np.volume {
+                                MacMediaButton(systemName: VolumeRow.icon(for: volume), size: 11, isOn: showVolume, secondary: true) {
+                                    withAnimation(.easeOut(duration: 0.2)) { showVolume.toggle() }
+                                    volumeTouch += 1
+                                }
+                                .help(np.source == .spotify ? "Громкость Spotify" : "Громкость «Музыки»")
+                                .accessibilityLabel("Громкость")
+                            }
                             SpeakerButton(model: model, size: 11, macStyle: true)
                             if np.source != .youtube {
                                 MacMediaButton(systemName: "list.bullet", size: 11, isOn: model.showPlaylist, secondary: true) { model.togglePlaylist() }
@@ -599,6 +620,68 @@ struct ProgressRow: View {
     private func format(_ t: Double) -> String {
         let s = Int(t.isFinite ? t : 0)
         return String(format: "%d:%02d", s / 60, s % 60)
+    }
+}
+
+/// The player's own volume (Spotify / Music, not the Mac's), drawn like the progress bar it replaces.
+struct VolumeRow: View {
+    let volume: Int
+    var onChange: (Int) -> Void
+
+    @State private var dragValue: Int?
+    @State private var hovering = false
+
+    static func icon(for volume: Int) -> String {
+        switch volume {
+        case 0: return "speaker.slash.fill"
+        case ..<34: return "speaker.wave.1.fill"
+        case ..<67: return "speaker.wave.2.fill"
+        default: return "speaker.wave.3.fill"
+        }
+    }
+
+    var body: some View {
+        let shown = dragValue ?? volume
+        let active = hovering || dragValue != nil
+        HStack(spacing: 10) {
+            Image(systemName: "speaker.fill")
+                .onTapGesture { onChange(0) }
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    Capsule().fill(.white.opacity(0.2))
+                    Capsule().fill(.white.opacity(active ? 1 : 0.85))
+                        .frame(width: max(4, geo.size.width * Double(shown) / 100))
+                }
+                .frame(height: active ? 6 : 4)
+                .frame(maxHeight: .infinity)
+                .contentShape(Rectangle())
+                .highPriorityGesture(
+                    DragGesture(minimumDistance: 0)
+                        .onChanged { v in
+                            guard geo.size.width > 0 else { return }
+                            let value = Int((min(1, max(0, v.location.x / geo.size.width)) * 100).rounded())
+                            dragValue = value
+                            onChange(value)          // live: the music gets louder under the finger
+                        }
+                        .onEnded { _ in dragValue = nil }
+                )
+                .onHover { hovering = $0 }
+            }
+            .frame(height: 12)
+            .animation(.easeOut(duration: 0.12), value: active)
+            Image(systemName: "speaker.wave.3.fill")
+                .onTapGesture { onChange(100) }
+            Text("\(shown)")
+                .frame(width: 22, alignment: .trailing)
+        }
+        .font(.system(size: 10, weight: .medium).monospacedDigit())
+        .foregroundStyle(.white.opacity(active ? 0.75 : 0.5))
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Громкость")
+        .accessibilityValue("\(shown) процентов")
+        .accessibilityAdjustableAction { direction in
+            onChange(volume + (direction == .increment ? 10 : -10))
+        }
     }
 }
 
